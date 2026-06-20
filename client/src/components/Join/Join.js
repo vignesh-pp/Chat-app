@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 
 import './Join.css';
 
@@ -14,6 +14,18 @@ export default function SignIn({ history }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [isLocal, setIsLocal] = useState(true);
+
+  useEffect(() => {
+    fetch('http://localhost:5000/api/config')
+      .then(res => res.json())
+      .then(data => {
+        if (typeof data.isLocal === 'boolean') {
+          setIsLocal(data.isLocal);
+        }
+      })
+      .catch(err => console.error('Failed to fetch backend configuration, defaulting to local mode.', err));
+  }, []);
 
   const handleAuth = async (e) => {
     e.preventDefault();
@@ -29,16 +41,39 @@ export default function SignIn({ history }) {
         return;
       }
 
-      // Fetch existing users
-      const localUsers = JSON.parse(localStorage.getItem('aether_users') || '[]');
-      const matchedUser = localUsers.find(u => u.username === userVal && u.password === passVal);
-      if (!matchedUser) {
-        setError('Invalid username or password');
-        return;
+      if (isLocal) {
+        // Fetch existing users
+        const localUsers = JSON.parse(localStorage.getItem('aether_users') || '[]');
+        const matchedUser = localUsers.find(u => u.username === userVal && u.password === passVal);
+        if (!matchedUser) {
+          setError('Invalid username or password');
+          return;
+        }
+        // Successful Login: Set session and redirect
+        localStorage.setItem('aether_session', username.trim());
+        history.push(`/chat?name=${username.trim()}`);
+      } else {
+        // Database login flow
+        setLoading(true);
+        try {
+          const res = await fetch('http://localhost:5000/api/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: userVal, password: passVal })
+          });
+          const data = await res.json();
+          if (data.error) {
+            setError(data.error);
+          } else {
+            localStorage.setItem('aether_session', username.trim());
+            history.push(`/chat?name=${username.trim()}`);
+          }
+        } catch (err) {
+          setError('Failed to connect to login server.');
+        } finally {
+          setLoading(false);
+        }
       }
-      // Successful Login: Set session and redirect
-      localStorage.setItem('aether_session', username.trim());
-      history.push(`/chat?name=${username.trim()}`);
     } else {
       // Signup flow
       const emailVal = email.trim().toLowerCase();
@@ -55,11 +90,42 @@ export default function SignIn({ history }) {
         return;
       }
 
-      const localUsers = JSON.parse(localStorage.getItem('aether_users') || '[]');
-      const userExists = localUsers.some(u => u.username === userVal);
-      if (userExists) {
-        setError('Username is already taken');
-        return;
+      if (isLocal) {
+        const localUsers = JSON.parse(localStorage.getItem('aether_users') || '[]');
+        const userExists = localUsers.some(u => u.username === userVal);
+        if (userExists) {
+          setError('Username is already taken');
+          return;
+        }
+      } else {
+        // Database username check flow
+        if (!isVerifying) {
+          setLoading(true);
+          try {
+            const checkRes = await fetch('http://localhost:5000/api/check-username', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ username: userVal })
+            });
+            const checkData = await checkRes.json();
+            if (checkData.error) {
+              setError(checkData.error);
+              setLoading(false);
+              return;
+            }
+            if (!checkData.available) {
+              setError('Username is already taken');
+              setLoading(false);
+              return;
+            }
+          } catch (err) {
+            setError('Failed to contact database check server.');
+            setLoading(false);
+            return;
+          } finally {
+            setLoading(false);
+          }
+        }
       }
 
       if (!isVerifying) {
@@ -100,19 +166,42 @@ export default function SignIn({ history }) {
           if (data.error) {
             setError(data.error);
           } else {
-            // Save new user
-            localUsers.push({ username: userVal, email: emailVal, password: passVal });
-            localStorage.setItem('aether_users', JSON.stringify(localUsers));
-            
-            setSuccess('Registration successful! Please login.');
-            setIsLogin(true);
-            setUsername('');
-            setEmail('');
-            setPassword('');
-            setConfirmPassword('');
-            setOtp('');
-            setIsVerifying(false);
-            setPreviewUrl('');
+            if (isLocal) {
+              const localUsers = JSON.parse(localStorage.getItem('aether_users') || '[]');
+              localUsers.push({ username: userVal, email: emailVal, password: passVal });
+              localStorage.setItem('aether_users', JSON.stringify(localUsers));
+              
+              setSuccess('Registration successful! Please login.');
+              setIsLogin(true);
+              setUsername('');
+              setEmail('');
+              setPassword('');
+              setConfirmPassword('');
+              setOtp('');
+              setIsVerifying(false);
+              setPreviewUrl('');
+            } else {
+              // Sign up in DB
+              const signupRes = await fetch('http://localhost:5000/api/signup', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username: userVal, email: emailVal, password: passVal })
+              });
+              const signupData = await signupRes.json();
+              if (signupData.error) {
+                setError(signupData.error);
+              } else {
+                setSuccess('Registration successful! Please login.');
+                setIsLogin(true);
+                setUsername('');
+                setEmail('');
+                setPassword('');
+                setConfirmPassword('');
+                setOtp('');
+                setIsVerifying(false);
+                setPreviewUrl('');
+              }
+            }
           }
         } catch (err) {
           setError('Failed to contact authentication server.');

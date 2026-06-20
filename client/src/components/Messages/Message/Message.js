@@ -21,7 +21,7 @@ const getAvatarColor = (name) => {
   return colors[index];
 };
 
-const Message = ({ message: { id, text, user, isImage, time, isEdited, isDeleted }, name, onStartEdit, onDelete }) => {
+const Message = ({ message: { id, text, user, isImage, isFile, fileName, fileType, time, isEdited, isDeleted }, name, onStartEdit, onDelete }) => {
   let isSentByCurrentUser = false;
   const trimmedName = name.trim().toLowerCase();
   const messageUser = user ? user.trim().toLowerCase() : '';
@@ -74,6 +74,39 @@ const Message = ({ message: { id, text, user, isImage, time, isEdited, isDeleted
     );
   }
 
+  const renderMessageContent = () => {
+    if (isImage) {
+      return <img className="messageImage" src={text} alt="Shared" />;
+    } else if (isFile) {
+      return (
+        <div className="fileMessageContainer">
+          <div className="fileMessageIcon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+              <polyline points="14 2 14 8 20 8"></polyline>
+              <line x1="16" y1="13" x2="8" y2="13"></line>
+              <line x1="16" y1="17" x2="8" y2="17"></line>
+              <polyline points="10 9 9 9 8 9"></polyline>
+            </svg>
+          </div>
+          <div className="fileMessageInfo">
+            <span className="fileMessageName" title={fileName}>{fileName || 'Attachment'}</span>
+            <span className="fileMeta">{fileType || 'Unknown file'}</span>
+          </div>
+          <a href={text} download={fileName || 'attachment'} className="fileDownloadLink" title="Download file">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="7 10 12 15 17 10"></polyline>
+              <line x1="12" y1="15" x2="12" y2="3"></line>
+            </svg>
+          </a>
+        </div>
+      );
+    } else {
+      return <p className="messageText">{ReactEmoji.emojify(text)}</p>;
+    }
+  };
+
   return (
     isSentByCurrentUser ? (
       <div className="messageContainer justifyEnd bubbleHoverContainer">
@@ -83,7 +116,7 @@ const Message = ({ message: { id, text, user, isImage, time, isEdited, isDeleted
           <div className="bubbleActionsWrapper">
             {/* Edit / Delete menu option buttons */}
             <div className="bubbleActionMenu">
-              {!isImage && (
+              {!isImage && !isFile && (
                 <button 
                   onClick={() => onStartEdit({ id, text })} 
                   className="messageActionBtn edit" 
@@ -102,11 +135,7 @@ const Message = ({ message: { id, text, user, isImage, time, isEdited, isDeleted
             </div>
 
             <div className="messageBox backgroundBlue">
-              {isImage ? (
-                <img className="messageImage" src={text} alt="Shared" />
-              ) : (
-                <p className="messageText colorWhite">{ReactEmoji.emojify(text)}</p>
-              )}
+              {renderMessageContent()}
             </div>
           </div>
           
@@ -123,11 +152,7 @@ const Message = ({ message: { id, text, user, isImage, time, isEdited, isDeleted
         <div className="messageContentWrapper alignStart">
           <span className="messageSenderName">{user}</span>
           <div className="messageBox backgroundLight">
-            {isImage ? (
-              <img className="messageImage" src={text} alt="Shared" />
-            ) : (
-              <p className="messageText colorWhite">{ReactEmoji.emojify(text)}</p>
-            )}
+            {renderMessageContent()}
           </div>
           <span className="messageTime">
             {time || 'Just now'} {isEdited && <span className="editedTag">• Edited</span>}

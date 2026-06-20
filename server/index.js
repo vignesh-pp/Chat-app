@@ -2,6 +2,48 @@ const http = require('http');
 const express = require('express');
 const socketio = require('socket.io');
 const cors = require('cors');
+const fs = require('fs');
+const path = require('path');
+const mongoose = require('mongoose');
+
+const User = require('./models/User');
+const Message = require('./models/Message');
+const Unread = require('./models/Unread');
+
+const rooms = ['general', 'random', 'tech'];
+
+// Load config.json
+let config = { isLocal: true, mongoURI: 'mongodb://localhost:27017/aetherchat' };
+try {
+  const configPath = path.join(__dirname, 'config.json');
+  if (fs.existsSync(configPath)) {
+    config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+  } else {
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8');
+  }
+} catch (err) {
+  console.error('Failed to load config.json, using defaults.', err);
+}
+
+// Connect to MongoDB if not local mode
+if (!config.isLocal) {
+  mongoose.connect(config.mongoURI)
+    .then(async () => {
+      console.log('MongoDB connected successfully.');
+      try {
+        const dbRooms = await Message.distinct('room', { room: { $not: /^private_/ } });
+        dbRooms.forEach(r => {
+          if (r && !rooms.includes(r)) {
+            rooms.push(r);
+          }
+        });
+        console.log('Loaded rooms from DB:', rooms);
+      } catch (err) {
+        console.error('Error fetching distinct rooms from DB:', err);
+      }
+    })
+    .catch(err => console.error('MongoDB connection error:', err));
+}
 
 const nodemailer = require('nodemailer');
 
@@ -17,7 +59,6 @@ app.use(cors());
 app.use(express.json());
 app.use(router);
 
-const rooms = ['general', 'random', 'tech'];
 const messagesByRoom = {};
 
 const getPrivateRoomId = (userA, userB) => {
@@ -26,14 +67,47 @@ const getPrivateRoomId = (userA, userB) => {
 };
 
 io.on('connect', (socket) => {
-  socket.on('join', ({ name, room }, callback) => {
+  socket.on('join', async ({ name, room }, callback) => {
     // If no room is specified, join 'general'
     const targetRoom = (room || 'general').trim().toLowerCase();
     const { error, user } = addUser({ id: socket.id, name, room: targetRoom });
 
     if(error) return callback(error);
 
+    const myNameLower = user.name.trim().toLowerCase();
+
+    // Join user's active room
     socket.join(user.room);
+
+    // Join all public rooms to get real-time messages/edits/deletions and unread notifications
+    rooms.forEach(r => {
+      socket.join(r);
+    });
+
+    // Also join any private rooms they belong to
+    if (!config.isLocal) {
+      try {
+        const dmRooms = await Message.distinct('room', {
+          room: { $regex: new RegExp(`^private_.*${myNameLower}.*`, 'i') }
+        });
+        dmRooms.forEach(dmRoom => {
+          socket.join(dmRoom);
+        });
+      } catch (err) {
+        console.error('Error fetching/joining DM rooms on startup:', err);
+      }
+    } else {
+      const userPrivateRooms = Object.keys(messagesByRoom).filter(rk => {
+        if (rk.startsWith('private_')) {
+          const parts = rk.replace('private_', '').split('_');
+          return parts.includes(myNameLower);
+        }
+        return false;
+      });
+      userPrivateRooms.forEach(rk => {
+        socket.join(rk);
+      });
+    }
 
     const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     socket.emit('message', { user: 'admin', text: `${user.name}, welcome to room ${user.room}.`, room: user.room, time });
@@ -45,25 +119,71 @@ io.on('connect', (socket) => {
     io.emit('allUsers', { users: getAllUsers() });
     socket.emit('allRooms', { rooms });
 
-    const myNameLower = user.name.trim().toLowerCase();
-    const userPrivateRooms = Object.keys(messagesByRoom).filter(rk => {
-      if (rk.startsWith('private_')) {
-        const parts = rk.replace('private_', '').split('_');
-        return parts.includes(myNameLower);
+    if (!config.isLocal) {
+      try {
+        const dbMessages = await Message.find({
+          $or: [
+            { room: { $in: rooms } },
+            { room: { $regex: new RegExp(`^private_.*${myNameLower}.*`, 'i') } }
+          ]
+        }).sort({ createdAt: 1 }).lean();
+
+        const initMessages = {};
+        rooms.forEach(r => {
+          initMessages[r] = [];
+        });
+
+        dbMessages.forEach(msg => {
+          const formattedMsg = {
+            id: msg.id,
+            user: msg.user,
+            text: msg.text,
+            isImage: msg.isImage,
+            isFile: msg.isFile,
+            fileName: msg.fileName,
+            fileType: msg.fileType,
+            room: msg.room,
+            time: msg.time,
+            isEdited: msg.isEdited,
+            isDeleted: msg.isDeleted
+          };
+          if (!initMessages[msg.room]) {
+            initMessages[msg.room] = [];
+          }
+          initMessages[msg.room].push(formattedMsg);
+        });
+
+        socket.emit('initMessages', initMessages);
+
+        const unreads = await Unread.find({ username: myNameLower });
+        const initUnread = {};
+        unreads.forEach(u => {
+          initUnread[u.room] = u.count;
+        });
+        socket.emit('initUnread', initUnread);
+      } catch (err) {
+        console.error('Error fetching chat history / unread counts from DB:', err);
       }
-      return false;
-    });
+    } else {
+      const userPrivateRooms = Object.keys(messagesByRoom).filter(rk => {
+        if (rk.startsWith('private_')) {
+          const parts = rk.replace('private_', '').split('_');
+          return parts.includes(myNameLower);
+        }
+        return false;
+      });
 
-    const initMessages = {};
-    initMessages['general'] = messagesByRoom['general'] || [];
-    rooms.forEach(r => {
-      initMessages[r] = messagesByRoom[r] || [];
-    });
-    userPrivateRooms.forEach(rk => {
-      initMessages[rk] = messagesByRoom[rk] || [];
-    });
+      const initMessages = {};
+      initMessages['general'] = messagesByRoom['general'] || [];
+      rooms.forEach(r => {
+        initMessages[r] = messagesByRoom[r] || [];
+      });
+      userPrivateRooms.forEach(rk => {
+        initMessages[rk] = messagesByRoom[rk] || [];
+      });
 
-    socket.emit('initMessages', initMessages);
+      socket.emit('initMessages', initMessages);
+    }
 
     callback();
   });
@@ -73,7 +193,8 @@ io.on('connect', (socket) => {
     if (!user) return callback({ error: 'User not found' });
 
     const oldRoom = user.room;
-    socket.leave(oldRoom);
+    // Note: Do not call socket.leave(oldRoom) so the client remains joined to all rooms 
+    // to receive real-time notifications, messages, edits, and deletions.
     socket.join(newRoom);
     user.room = newRoom;
 
@@ -88,6 +209,15 @@ io.on('connect', (socket) => {
     socket.broadcast.to(newRoom).emit('message', { user: 'admin', text: `${user.name} has joined!`, room: newRoom, time });
     io.to(newRoom).emit('roomData', { room: newRoom, users: getUsersInRoom(newRoom) });
 
+    if (!config.isLocal) {
+      const myNameLower = user.name.trim().toLowerCase();
+      Unread.findOneAndUpdate(
+        { username: myNameLower, room: newRoom },
+        { count: 0 },
+        { upsert: true }
+      ).catch(err => console.error('Error clearing unread count in DB:', err));
+    }
+
     callback();
   });
 
@@ -96,6 +226,14 @@ io.on('connect', (socket) => {
     if (formattedRoom && !rooms.includes(formattedRoom)) {
       rooms.push(formattedRoom);
       io.emit('allRooms', { rooms });
+
+      // Make all currently connected sockets join the new room in real-time
+      const connectedSockets = io.sockets.sockets;
+      if (connectedSockets) {
+        Object.keys(connectedSockets).forEach(id => {
+          connectedSockets[id].join(formattedRoom);
+        });
+      }
     }
     callback();
   });
@@ -116,6 +254,9 @@ io.on('connect', (socket) => {
         user: user.name,
         text: messageData.text,
         isImage: messageData.isImage,
+        isFile: messageData.isFile || false,
+        fileName: messageData.fileName || null,
+        fileType: messageData.fileType || null,
         room: roomKey,
         time
       };
@@ -124,6 +265,15 @@ io.on('connect', (socket) => {
       if (!messagesByRoom[roomKey]) messagesByRoom[roomKey] = [];
       messagesByRoom[roomKey].push(payload);
 
+      // Make both sender and recipient sockets join the DM room
+      socket.join(roomKey);
+      if (recipientUser) {
+        const recipientSocket = io.sockets.sockets[recipientUser.id];
+        if (recipientSocket) {
+          recipientSocket.join(roomKey);
+        }
+      }
+
       // Send to sender
       socket.emit('message', payload);
 
@@ -131,9 +281,37 @@ io.on('connect', (socket) => {
       if (recipientUser) {
         io.to(recipientUser.id).emit('message', payload);
       }
+
+      if (!config.isLocal) {
+        const dbMsg = new Message({
+          id: payload.id,
+          user: payload.user,
+          text: payload.text,
+          isImage: payload.isImage,
+          isFile: payload.isFile,
+          fileName: payload.fileName,
+          fileType: payload.fileType,
+          room: payload.room,
+          time: payload.time
+        });
+        dbMsg.save().catch(err => console.error('Error saving DM message to DB:', err));
+
+        // Increment unread count for recipient in DB if they are not active in this private room
+        const recipientActiveInRoom = getUsersInRoom(roomKey).some(u => u.name === recipientName);
+        if (!recipientActiveInRoom) {
+          Unread.findOneAndUpdate(
+            { username: recipientName, room: roomKey },
+            { $inc: { count: 1 } },
+            { upsert: true }
+          ).catch(err => console.error('Error incrementing unread in DB:', err));
+        }
+      }
     } else {
       const textVal = typeof messageData === 'object' ? messageData.text : messageData;
       const isImageVal = typeof messageData === 'object' ? messageData.isImage : false;
+      const isFileVal = typeof messageData === 'object' ? messageData.isFile : false;
+      const fileNameVal = typeof messageData === 'object' ? messageData.fileName : null;
+      const fileTypeVal = typeof messageData === 'object' ? messageData.fileType : null;
       const idVal = typeof messageData === 'object' ? messageData.id : (Date.now() + Math.random().toString(36).substr(2, 9));
 
       const payload = {
@@ -141,6 +319,9 @@ io.on('connect', (socket) => {
         user: user.name,
         text: textVal,
         isImage: isImageVal,
+        isFile: isFileVal,
+        fileName: fileNameVal,
+        fileType: fileTypeVal,
         room: user.room,
         time
       };
@@ -150,6 +331,39 @@ io.on('connect', (socket) => {
       messagesByRoom[user.room].push(payload);
 
       io.to(user.room).emit('message', payload);
+
+      if (!config.isLocal) {
+        const dbMsg = new Message({
+          id: payload.id,
+          user: payload.user,
+          text: payload.text,
+          isImage: payload.isImage,
+          isFile: payload.isFile,
+          fileName: payload.fileName,
+          fileType: payload.fileType,
+          room: payload.room,
+          time: payload.time
+        });
+        dbMsg.save().catch(err => console.error('Error saving message to DB:', err));
+
+        // Increment unread count for other users in this room
+        User.find({}, 'username').then(dbUsers => {
+          const activeUsersInRoom = getUsersInRoom(user.room).map(u => u.name.trim().toLowerCase());
+          const targetUsers = dbUsers
+            .map(u => u.username.trim().toLowerCase())
+            .filter(username => username !== user.name.trim().toLowerCase() && !activeUsersInRoom.includes(username));
+
+          if (targetUsers.length > 0) {
+            Promise.all(targetUsers.map(uName => 
+              Unread.findOneAndUpdate(
+                { username: uName, room: user.room },
+                { $inc: { count: 1 } },
+                { upsert: true }
+              )
+            )).catch(err => console.error('Error updating unreads in DB:', err));
+          }
+        }).catch(err => console.error('Error querying users for unreads:', err));
+      }
     }
 
     callback();
@@ -189,6 +403,13 @@ io.on('connect', (socket) => {
       }
     }
 
+    if (!config.isLocal) {
+      Message.findOneAndUpdate(
+        { id: messageId },
+        { text: newText, isEdited: true }
+      ).catch(err => console.error('Error editing message in DB:', err));
+    }
+
     callback();
   });
 
@@ -224,6 +445,13 @@ io.on('connect', (socket) => {
         msg.text = 'This message was deleted';
         msg.isDeleted = true;
       }
+    }
+
+    if (!config.isLocal) {
+      Message.findOneAndUpdate(
+        { id: messageId },
+        { text: 'This message was deleted', isDeleted: true }
+      ).catch(err => console.error('Error deleting message in DB:', err));
     }
 
     callback();
@@ -407,6 +635,80 @@ app.post('/api/verify-otp', (req, res) => {
 
   delete otps[formattedEmail];
   res.json({ success: true });
+});
+
+app.get('/api/config', (req, res) => {
+  res.json({ isLocal: config.isLocal });
+});
+
+app.post('/api/check-username', async (req, res) => {
+  const { username } = req.body;
+  if (!username) return res.status(400).json({ error: 'Username is required.' });
+  const formattedUsername = username.trim().toLowerCase();
+  
+  if (config.isLocal) {
+    return res.json({ success: true, available: true });
+  } else {
+    try {
+      const user = await User.findOne({ username: formattedUsername });
+      if (user) {
+        return res.json({ success: true, available: false });
+      }
+      return res.json({ success: true, available: true });
+    } catch (err) {
+      console.error(err);
+      return res.status(500).json({ error: 'Database check failed.' });
+    }
+  }
+});
+
+app.post('/api/signup', async (req, res) => {
+  const { username, email, password } = req.body;
+  if (!username || !email || !password) {
+    return res.status(400).json({ error: 'Username, email, and password are required.' });
+  }
+  const formattedUsername = username.trim().toLowerCase();
+  const formattedEmail = email.trim().toLowerCase();
+
+  if (config.isLocal) {
+    return res.status(400).json({ error: 'DB operations are disabled in local mode.' });
+  }
+
+  try {
+    const existingUser = await User.findOne({ username: formattedUsername });
+    if (existingUser) {
+      return res.status(400).json({ error: 'Username is already taken.' });
+    }
+    const newUser = new User({ username: formattedUsername, email: formattedEmail, password });
+    await newUser.save();
+    res.json({ success: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to create user account.' });
+  }
+});
+
+app.post('/api/login', async (req, res) => {
+  const { username, password } = req.body;
+  if (!username || !password) {
+    return res.status(400).json({ error: 'Username and password are required.' });
+  }
+  const formattedUsername = username.trim().toLowerCase();
+
+  if (config.isLocal) {
+    return res.status(400).json({ error: 'DB operations are disabled in local mode.' });
+  }
+
+  try {
+    const user = await User.findOne({ username: formattedUsername, password });
+    if (!user) {
+      return res.status(400).json({ error: 'Invalid username or password.' });
+    }
+    res.json({ success: true, username: user.username });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Login authentication failed.' });
+  }
 });
 
 server.listen(process.env.PORT || 5000, () => console.log(`Server has started.`));

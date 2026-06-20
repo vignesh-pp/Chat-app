@@ -626,16 +626,19 @@ const Chat = ({ location, history }) => {
     setMessage('');
   };
 
-  const sendImage = (base64Data) => {
+  const sendFile = (base64Data, isImage, fileName, fileType) => {
     const msgId = Date.now() + Math.random().toString(36).substr(2, 9);
     socket.emit('sendMessage', {
       id: msgId,
       text: base64Data,
-      isImage: true,
+      isImage: isImage,
+      isFile: !isImage,
+      fileName: !isImage ? fileName : null,
+      fileType: !isImage ? fileType : null,
       recipient: activeChat.type === 'dm' ? activeChat.id : null,
       type: activeChat.type
     }, () => {});
-  }
+  };
 
   const handleTyping = () => {
     if (!isTypingRef.current) {
@@ -767,7 +770,7 @@ const Chat = ({ location, history }) => {
             setMessage={setMessage} 
             sendMessage={handleSendOrEdit} 
             onTyping={handleTyping}
-            onSendImage={sendImage}
+            onSendFile={sendFile}
           />
         </div>
       </div>
