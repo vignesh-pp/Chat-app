@@ -9,6 +9,7 @@
   justify-content: space-between;
   transition: background 0.3s ease, border-color 0.3s ease;
   flex-shrink: 0;
+  position: relative;
 }
 
 .sidebarHeader {
@@ -447,4 +448,221 @@
   .deleteChatBtn {
     display: none !important; /* Hide delete button in mobile compact view */
   }
+}
+
+/* Group Creator Modal overlay & card layout */
+.groupModalOverlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(10, 13, 20, 0.75);
+  backdrop-filter: blur(8px);
+  z-index: 1000;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 16px;
+  animation: fadeIn 0.2s ease;
+}
+
+.groupModalCard {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  width: 100%;
+  max-width: 290px;
+  border-radius: 16px;
+  padding: 18px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  animation: scaleUp 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.groupModalTitle {
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.groupModalInput {
+  background: var(--input-bg);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 0.88rem;
+  width: 100%;
+  outline: none;
+  font-family: inherit;
+  transition: border-color 0.2s ease;
+}
+
+.groupModalInput:focus {
+  border-color: #6366f1;
+}
+
+.memberSelectionHeader {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  margin-top: 4px;
+}
+
+.selectedMembersContainer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-height: 70px;
+  overflow-y: auto;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.selectedMembersContainer::-webkit-scrollbar {
+  width: 4px;
+}
+
+.selectedMembersContainer::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
+}
+
+.selectedMemberChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(99, 102, 241, 0.12);
+  border: 1px solid rgba(99, 102, 241, 0.25);
+  color: #6366f1;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 0.72rem;
+  font-weight: 500;
+}
+
+.removeMemberBtn {
+  background: none;
+  border: none;
+  color: #ef4444;
+  cursor: pointer;
+  padding: 0;
+  font-size: 0.72rem;
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+}
+
+.contactsSelectionList {
+  max-height: 140px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.contactsSelectionList::-webkit-scrollbar {
+  width: 4px;
+}
+
+.contactsSelectionList::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
+}
+
+.contactSelectionItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: var(--input-bg);
+  border: 1px solid transparent;
+  transition: all 0.2s ease;
+}
+
+.contactSelectionItem.selected {
+  border-color: rgba(99, 102, 241, 0.3);
+  background: rgba(99, 102, 241, 0.04);
+}
+
+.contactSelectionInfo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.contactSelectionName {
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 140px;
+}
+
+.memberActionBtn {
+  background: #6366f1;
+  color: #ffffff;
+  border: none;
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.memberActionBtn.remove {
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.2);
+}
+
+.memberActionBtn:hover {
+  transform: translateY(-1px);
+}
+
+.groupModalActions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.groupModalBtn {
+  flex: 1;
+  padding: 10px;
+  border-radius: 8px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-family: inherit;
+  text-align: center;
+  border: none;
+}
+
+.groupModalBtn.cancel {
+  background: var(--input-bg);
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+}
+
+.groupModalBtn.cancel:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.groupModalBtn.create {
+  background: #6366f1;
+  color: #ffffff;
+}
+
+.groupModalBtn.create:hover {
+  background: #4f46e5;
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
 }

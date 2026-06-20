@@ -9,6 +9,7 @@ const mongoose = require('mongoose');
 const User = require('./models/User');
 const Message = require('./models/Message');
 const Unread = require('./models/Unread');
+const Room = require('./models/Room');
 
 const rooms = ['general', 'random', 'tech'];
 
@@ -37,6 +38,14 @@ if (!config.isLocal) {
             rooms.push(r);
           }
         });
+        
+        const customRoomsDb = await Room.find({});
+        customRoomsDb.forEach(r => {
+          if (r.name && !rooms.includes(r.name)) {
+            rooms.push(r.name);
+          }
+        });
+        
         console.log('Loaded rooms from DB:', rooms);
       } catch (err) {
         console.error('Error fetching distinct rooms from DB:', err);
@@ -60,10 +69,44 @@ app.use(express.json());
 app.use(router);
 
 const messagesByRoom = {};
+const customRooms = {};
+const activeCalls = {};
 
 const getPrivateRoomId = (userA, userB) => {
   const sorted = [userA.trim().toLowerCase(), userB.trim().toLowerCase()].sort();
   return `private_${sorted[0]}_${sorted[1]}`;
+};
+
+const getRoomsForUser = async (username) => {
+  const defaultRooms = ['general', 'random', 'tech'];
+  const uNameLower = username.trim().toLowerCase();
+
+  if (config.isLocal) {
+    const userRooms = [...defaultRooms];
+    Object.keys(customRooms).forEach(rName => {
+      const r = customRooms[rName];
+      if (r.members.includes(uNameLower)) {
+        userRooms.push(rName);
+      }
+    });
+    return userRooms;
+  } else {
+    try {
+      const dbRooms = await Room.find({
+        members: { $in: [uNameLower] }
+      });
+      const userRooms = [...defaultRooms];
+      dbRooms.forEach(r => {
+        if (!userRooms.includes(r.name)) {
+          userRooms.push(r.name);
+        }
+      });
+      return userRooms;
+    } catch (err) {
+      console.error('Error fetching user rooms from DB:', err);
+      return defaultRooms;
+    }
+  }
 };
 
 io.on('connect', (socket) => {
@@ -79,8 +122,13 @@ io.on('connect', (socket) => {
     // Join user's active room
     socket.join(user.room);
 
-    // Join all public rooms to get real-time messages/edits/deletions and unread notifications
-    rooms.forEach(r => {
+    // Join default rooms and user's custom member rooms
+    const defaultRooms = ['general', 'random', 'tech'];
+    defaultRooms.forEach(r => {
+      socket.join(r);
+    });
+    const userRooms = await getRoomsForUser(user.name);
+    userRooms.forEach(r => {
       socket.join(r);
     });
 
@@ -119,7 +167,8 @@ io.on('connect', (socket) => {
 
     // Broadcast updated directories
     io.emit('allUsers', { users: getAllUsers() });
-    socket.emit('allRooms', { rooms });
+    const userRoomsList = await getRoomsForUser(user.name);
+    socket.emit('allRooms', { rooms: userRoomsList });
 
     if (!config.isLocal) {
       try {
@@ -228,21 +277,244 @@ io.on('connect', (socket) => {
     callback();
   });
 
-  socket.on('createRoom', ({ roomName }, callback) => {
-    const formattedRoom = roomName.trim().toLowerCase();
-    if (formattedRoom && !rooms.includes(formattedRoom)) {
-      rooms.push(formattedRoom);
-      io.emit('allRooms', { rooms });
+  socket.on('createRoom', async ({ roomName, members }, callback) => {
+    const user = getUser(socket.id);
+    if (!user) return callback ? callback({ error: 'User not found' }) : null;
 
-      // Make all currently connected sockets join the new room in real-time
-      const connectedSockets = io.sockets.sockets;
-      if (connectedSockets) {
-        Object.keys(connectedSockets).forEach(id => {
-          connectedSockets[id].join(formattedRoom);
+    const formattedRoom = roomName.trim().toLowerCase();
+    if (!formattedRoom) return callback ? callback({ error: 'Invalid room name' }) : null;
+
+    const defaultRooms = ['general', 'random', 'tech'];
+    if (defaultRooms.includes(formattedRoom)) {
+      return callback ? callback({ error: 'Cannot create a room with a default room name' }) : null;
+    }
+
+    const memberSet = new Set((members || []).map(m => m.trim().toLowerCase()));
+    memberSet.add(user.name.trim().toLowerCase());
+    const finalMembers = Array.from(memberSet);
+
+    if (config.isLocal) {
+      if (customRooms[formattedRoom]) {
+        return callback ? callback({ error: 'Room already exists' }) : null;
+      }
+      customRooms[formattedRoom] = {
+        name: formattedRoom,
+        creator: user.name.trim().toLowerCase(),
+        members: finalMembers
+      };
+      if (!rooms.includes(formattedRoom)) {
+        rooms.push(formattedRoom);
+      }
+      await broadcastRoomsUpdate(formattedRoom, finalMembers);
+    } else {
+      try {
+        const existing = await Room.findOne({ name: formattedRoom });
+        if (existing) {
+          return callback ? callback({ error: 'Room already exists' }) : null;
+        }
+        const newRoomDoc = new Room({
+          name: formattedRoom,
+          creator: user.name.trim().toLowerCase(),
+          members: finalMembers
         });
+        await newRoomDoc.save();
+        if (!rooms.includes(formattedRoom)) {
+          rooms.push(formattedRoom);
+        }
+        await broadcastRoomsUpdate(formattedRoom, finalMembers);
+      } catch (err) {
+        console.error('Error creating room in DB:', err);
+        return callback ? callback({ error: 'Failed to create room in database' }) : null;
       }
     }
-    callback();
+
+    async function broadcastRoomsUpdate(roomNameVal, membersList) {
+      const connectedUsers = getAllUsers();
+      for (const u of connectedUsers) {
+        const uNameLower = u.name.trim().toLowerCase();
+        if (membersList.includes(uNameLower)) {
+          const memberSocket = io.sockets.sockets[u.id];
+          if (memberSocket) {
+            memberSocket.join(roomNameVal);
+            const uRooms = await getRoomsForUser(u.name);
+            memberSocket.emit('allRooms', { rooms: uRooms });
+          }
+        }
+      }
+    }
+
+    if (callback) callback();
+  });
+
+  socket.on('getRoomMembers', async ({ roomName }, callback) => {
+    const user = getUser(socket.id);
+    if (!user) return callback ? callback({ error: 'User not found' }) : null;
+
+    const formattedRoom = roomName.trim().toLowerCase();
+    const defaultRooms = ['general', 'random', 'tech'];
+    if (defaultRooms.includes(formattedRoom)) {
+      socket.emit('roomMembers', { room: formattedRoom, creator: 'admin', members: [] });
+      return callback ? callback() : null;
+    }
+
+    let creator = 'admin';
+    let members = [];
+
+    if (config.isLocal) {
+      if (customRooms[formattedRoom]) {
+        creator = customRooms[formattedRoom].creator;
+        members = customRooms[formattedRoom].members;
+      }
+    } else {
+      try {
+        const roomDoc = await Room.findOne({ name: formattedRoom });
+        if (roomDoc) {
+          creator = roomDoc.creator;
+          members = roomDoc.members;
+        }
+      } catch (err) {
+        console.error('Error fetching room details from DB:', err);
+      }
+    }
+
+    socket.emit('roomMembers', { room: formattedRoom, creator, members });
+    if (callback) callback();
+  });
+
+  socket.on('addRoomMember', async ({ roomName, username }, callback) => {
+    const user = getUser(socket.id);
+    if (!user) return callback ? callback({ error: 'User not found' }) : null;
+
+    const formattedRoom = roomName.trim().toLowerCase();
+    const targetUser = username.trim().toLowerCase();
+
+    let creator = 'admin';
+    let members = [];
+
+    if (config.isLocal) {
+      if (customRooms[formattedRoom]) {
+        creator = customRooms[formattedRoom].creator;
+        if (!customRooms[formattedRoom].members.includes(targetUser)) {
+          customRooms[formattedRoom].members.push(targetUser);
+        }
+        members = customRooms[formattedRoom].members;
+      }
+    } else {
+      try {
+        const roomDoc = await Room.findOne({ name: formattedRoom });
+        if (roomDoc) {
+          creator = roomDoc.creator;
+          if (!roomDoc.members.includes(targetUser)) {
+            roomDoc.members.push(targetUser);
+            await roomDoc.save();
+          }
+          members = roomDoc.members;
+        }
+      } catch (err) {
+        console.error('Error adding room member in DB:', err);
+        return callback ? callback({ error: 'Failed to add member in DB' }) : null;
+      }
+    }
+
+    const connectedUsers = getAllUsers();
+    const addedOnline = connectedUsers.find(u => u.name.trim().toLowerCase() === targetUser);
+    if (addedOnline) {
+      const targetSocket = io.sockets.sockets[addedOnline.id];
+      if (targetSocket) {
+        targetSocket.join(formattedRoom);
+        const uRooms = await getRoomsForUser(addedOnline.name);
+        targetSocket.emit('allRooms', { rooms: uRooms });
+      }
+    }
+
+    io.to(formattedRoom).emit('roomMembers', { room: formattedRoom, creator, members });
+
+    if (callback) callback({ success: true });
+  });
+
+  socket.on('removeRoomMember', async ({ roomName, username }, callback) => {
+    const user = getUser(socket.id);
+    if (!user) return callback ? callback({ error: 'User not found' }) : null;
+
+    const formattedRoom = roomName.trim().toLowerCase();
+    const targetUser = username.trim().toLowerCase();
+
+    let creator = 'admin';
+    let members = [];
+
+    if (config.isLocal) {
+      if (customRooms[formattedRoom]) {
+        creator = customRooms[formattedRoom].creator;
+        customRooms[formattedRoom].members = customRooms[formattedRoom].members.filter(m => m !== targetUser);
+        members = customRooms[formattedRoom].members;
+      }
+    } else {
+      try {
+        const roomDoc = await Room.findOne({ name: formattedRoom });
+        if (roomDoc) {
+          creator = roomDoc.creator;
+          roomDoc.members = roomDoc.members.filter(m => m !== targetUser);
+          await roomDoc.save();
+          members = roomDoc.members;
+        }
+      } catch (err) {
+        console.error('Error removing room member in DB:', err);
+        return callback ? callback({ error: 'Failed to remove member in DB' }) : null;
+      }
+    }
+
+    const connectedUsers = getAllUsers();
+    const removedOnline = connectedUsers.find(u => u.name.trim().toLowerCase() === targetUser);
+    if (removedOnline) {
+      const targetSocket = io.sockets.sockets[removedOnline.id];
+      if (targetSocket) {
+        targetSocket.leave(formattedRoom);
+        const uRooms = await getRoomsForUser(removedOnline.name);
+        targetSocket.emit('allRooms', { rooms: uRooms });
+      }
+    }
+
+    io.to(formattedRoom).emit('roomMembers', { room: formattedRoom, creator, members });
+
+    if (callback) callback({ success: true });
+  });
+
+  socket.on('joinCall', ({ room, type }) => {
+    const user = getUser(socket.id);
+    if (!user) return;
+
+    if (!activeCalls[room]) {
+      activeCalls[room] = [];
+    }
+
+    if (!activeCalls[room].some(p => p.username.toLowerCase() === user.name.toLowerCase())) {
+      activeCalls[room].push({ username: user.name, socketId: socket.id });
+    }
+
+    io.to(room).emit('callParticipantsUpdate', {
+      room,
+      participants: activeCalls[room],
+      joinedUser: user.name,
+      type
+    });
+  });
+
+  socket.on('leaveCall', ({ room }) => {
+    const user = getUser(socket.id);
+    if (!user) return;
+
+    if (activeCalls[room]) {
+      activeCalls[room] = activeCalls[room].filter(p => p.socketId !== socket.id);
+      if (activeCalls[room].length === 0) {
+        delete activeCalls[room];
+      }
+    }
+
+    io.to(room).emit('callParticipantsUpdate', {
+      room,
+      participants: activeCalls[room] || [],
+      leftUser: user.name
+    });
   });
 
   socket.on('sendMessage', (messageData, callback) => {
@@ -558,11 +830,48 @@ io.on('connect', (socket) => {
     if (!config.isLocal) {
       try {
         await Message.deleteMany({ room: roomKey });
-        // Reset unread count for this room/chat for all users in DB
         await Unread.updateMany({ room: roomKey }, { count: 0 });
       } catch (err) {
         console.error('Error deleting chat from DB:', err);
         return callback({ error: 'Failed to delete chat history from DB.' });
+      }
+    }
+
+    if (type === 'group') {
+      const targetRoom = id.trim().toLowerCase();
+      let membersToUpdate = [];
+      if (config.isLocal) {
+        if (customRooms[targetRoom]) {
+          membersToUpdate = customRooms[targetRoom].members;
+          delete customRooms[targetRoom];
+        }
+      } else {
+        try {
+          const roomDoc = await Room.findOne({ name: targetRoom });
+          if (roomDoc) {
+            membersToUpdate = roomDoc.members;
+            await Room.deleteOne({ name: targetRoom });
+          }
+        } catch (err) {
+          console.error('Error deleting room document from DB:', err);
+        }
+      }
+
+      const idx = rooms.indexOf(targetRoom);
+      if (idx > -1) {
+        rooms.splice(idx, 1);
+      }
+
+      const connectedUsers = getAllUsers();
+      for (const u of connectedUsers) {
+        const uNameLower = u.name.trim().toLowerCase();
+        if (membersToUpdate.includes(uNameLower)) {
+          const memberSocket = io.sockets.sockets[u.id];
+          if (memberSocket) {
+            const uRooms = await getRoomsForUser(u.name);
+            memberSocket.emit('allRooms', { rooms: uRooms });
+          }
+        }
       }
     }
 
@@ -612,16 +921,20 @@ io.on('connect', (socket) => {
   });
 
   socket.on('answerCall', ({ to, signal }) => {
+    const user = getUser(socket.id);
+    if (!user) return;
     const callerUser = getAllUsers().find(u => u.name === to.trim().toLowerCase());
     if (callerUser) {
-      io.to(callerUser.id).emit('callAccepted', { signal });
+      io.to(callerUser.id).emit('callAccepted', { signal, from: user.name });
     }
   });
 
   socket.on('iceCandidate', ({ to, candidate }) => {
+    const user = getUser(socket.id);
+    if (!user) return;
     const targetUser = getAllUsers().find(u => u.name === to.trim().toLowerCase());
     if (targetUser) {
-      io.to(targetUser.id).emit('iceCandidate', { candidate });
+      io.to(targetUser.id).emit('iceCandidate', { candidate, from: user.name });
     }
   });
 
@@ -642,6 +955,22 @@ io.on('connect', (socket) => {
   socket.on('disconnect', () => {
     const user = removeUser(socket.id);
     const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+    Object.keys(activeCalls).forEach(roomName => {
+      const call = activeCalls[roomName];
+      const participant = call.find(p => p.socketId === socket.id);
+      if (participant) {
+        activeCalls[roomName] = call.filter(p => p.socketId !== socket.id);
+        if (activeCalls[roomName].length === 0) {
+          delete activeCalls[roomName];
+        }
+        io.to(roomName).emit('callParticipantsUpdate', {
+          room: roomName,
+          participants: activeCalls[roomName] || [],
+          leftUser: participant.username
+        });
+      }
+    });
 
     if (user) {
       if (user.room && !user.room.startsWith('private_')) {

@@ -84,8 +84,24 @@ const Chat = ({ location, history }) => {
   const [isMuted, setIsMuted] = useState(false);
   const [isCameraOff, setIsCameraOff] = useState(false);
   const [callDuration, setCallDuration] = useState(0);
+  const [roomMembers, setRoomMembers] = useState([]);
+  const [roomCreator, setRoomCreator] = useState('admin');
+  const [showMembersDropdown, setShowMembersDropdown] = useState(false);
+  const [callParticipants, setCallParticipants] = useState([]);
+  const [remoteStreams, setRemoteStreams] = useState({});
+  const peerConnectionsRef = useRef({});
 
   const callPartnerRef = useRef('');
+  const callStateRef = useRef(callState);
+  const callTypeRef = useRef(callType);
+
+  useEffect(() => {
+    callStateRef.current = callState;
+  }, [callState]);
+
+  useEffect(() => {
+    callTypeRef.current = callType;
+  }, [callType]);
   useEffect(() => {
     callPartnerRef.current = callPartner;
   }, [callPartner]);
@@ -190,11 +206,51 @@ const Chat = ({ location, history }) => {
     return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
   };
 
+  const createPeerConnection = (targetUsername, localStream, type) => {
+    if (peerConnectionsRef.current[targetUsername]) {
+      return peerConnectionsRef.current[targetUsername];
+    }
+
+    const pc = new RTCPeerConnection({
+      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+    });
+
+    if (localStream) {
+      localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+    }
+
+    pc.onicecandidate = (event) => {
+      if (event.candidate) {
+        socket.emit('iceCandidate', { to: targetUsername, candidate: event.candidate });
+      }
+    };
+
+    pc.ontrack = (event) => {
+      const remoteStream = event.streams[0];
+      setRemoteStreams(prev => ({
+        ...prev,
+        [targetUsername]: remoteStream
+      }));
+    };
+
+    peerConnectionsRef.current[targetUsername] = pc;
+    return pc;
+  };
+
   const resetCallState = () => {
     if (peerConnectionRef.current) {
       peerConnectionRef.current.close();
       peerConnectionRef.current = null;
     }
+    Object.keys(peerConnectionsRef.current).forEach(username => {
+      if (peerConnectionsRef.current[username]) {
+        peerConnectionsRef.current[username].close();
+      }
+    });
+    peerConnectionsRef.current = {};
+    setRemoteStreams({});
+    setCallParticipants([]);
+
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach(track => track.stop());
       localStreamRef.current = null;
@@ -234,58 +290,58 @@ const Chat = ({ location, history }) => {
   const startCall = async (type) => {
     setCallType(type);
     setCallPartner(activeChat.id);
-    setCallState('calling');
     setIsMuted(false);
     setIsCameraOff(false);
 
     try {
       const stream = await getMediaStream(type);
       localStreamRef.current = stream;
-      if (localVideoRef.current) {
-        localVideoRef.current.srcObject = stream;
+      
+      setTimeout(() => {
+        if (localVideoRef.current) {
+          localVideoRef.current.srcObject = stream;
+        }
+      }, 200);
+
+      if (activeChat.type === 'dm') {
+        setCallState('calling');
+        const pc = new RTCPeerConnection({
+          iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+        });
+
+        stream.getTracks().forEach(track => pc.addTrack(track, stream));
+
+        pc.onicecandidate = (event) => {
+          if (event.candidate) {
+            socket.emit('iceCandidate', { to: activeChat.id, candidate: event.candidate });
+          }
+        };
+
+        pc.ontrack = (event) => {
+          remoteStreamRef.current = event.streams[0];
+          if (remoteVideoRef.current) {
+            remoteVideoRef.current.srcObject = event.streams[0];
+          }
+        };
+
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+
+        socket.emit('callUser', {
+          userToCall: activeChat.id,
+          signalData: offer,
+          from: name,
+          type: type === 'video' && stream.getVideoTracks().length > 0 ? 'video' : 'audio'
+        });
+
+        peerConnectionRef.current = pc;
+      } else {
+        setCallState('connected');
+        socket.emit('joinCall', { room: activeChat.id, type });
       }
-
-      const pc = new RTCPeerConnection({
-        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
-      });
-
-      stream.getTracks().forEach(track => pc.addTrack(track, stream));
-
-      pc.onicecandidate = (event) => {
-        if (event.candidate) {
-          socket.emit('iceCandidate', { to: activeChat.id, candidate: event.candidate });
-        }
-      };
-
-      pc.ontrack = (event) => {
-        remoteStreamRef.current = event.streams[0];
-        if (remoteVideoRef.current) {
-          remoteVideoRef.current.srcObject = event.streams[0];
-        }
-      };
-
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-
-      socket.emit('callUser', {
-        userToCall: activeChat.id,
-        signalData: offer,
-        from: name,
-        type: type === 'video' && stream.getVideoTracks().length > 0 ? 'video' : 'audio'
-      });
-
-      peerConnectionRef.current = pc;
     } catch (err) {
       console.error('Failed to get media devices:', err);
-      if (err.message === 'SECURE_CONTEXT_ERROR') {
-        alert('Microphone/Camera access requires a secure connection. Please use localhost or HTTPS.');
-      } else if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-        alert('Permission to access microphone/camera was denied. Please check your browser settings.');
-      } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
-        alert('No microphone or camera detected. Please check your device connections.');
-      } else {
-        alert(`Could not access microphone/camera: ${err.message || err.name}`);
-      }
+      alert(`Could not access microphone/camera: ${err.message || err.name}`);
       endCall();
     }
   };
@@ -300,58 +356,57 @@ const Chat = ({ location, history }) => {
         if (localVideoRef.current) {
           localVideoRef.current.srcObject = stream;
         }
-        if (remoteVideoRef.current && remoteStreamRef.current) {
-          remoteVideoRef.current.srcObject = remoteStreamRef.current;
-        }
-      }, 100);
+      }, 200);
 
-      const pc = new RTCPeerConnection({
-        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
-      });
+      if (activeChat.type === 'dm') {
+        const pc = new RTCPeerConnection({
+          iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+        });
 
-      stream.getTracks().forEach(track => pc.addTrack(track, stream));
+        stream.getTracks().forEach(track => pc.addTrack(track, stream));
 
-      pc.onicecandidate = (event) => {
-        if (event.candidate) {
-          socket.emit('iceCandidate', { to: callPartner, candidate: event.candidate });
-        }
-      };
+        pc.onicecandidate = (event) => {
+          if (event.candidate) {
+            socket.emit('iceCandidate', { to: callPartner, candidate: event.candidate });
+          }
+        };
 
-      pc.ontrack = (event) => {
-        remoteStreamRef.current = event.streams[0];
-        if (remoteVideoRef.current) {
-          remoteVideoRef.current.srcObject = event.streams[0];
-        }
-      };
+        pc.ontrack = (event) => {
+          remoteStreamRef.current = event.streams[0];
+          if (remoteVideoRef.current) {
+            remoteVideoRef.current.srcObject = event.streams[0];
+          }
+        };
 
-      await pc.setRemoteDescription(new RTCSessionDescription(incomingSignal));
-      const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
+        await pc.setRemoteDescription(new RTCSessionDescription(incomingSignal));
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
 
-      socket.emit('answerCall', { to: callPartner, signal: answer });
-      peerConnectionRef.current = pc;
+        socket.emit('answerCall', { to: callPartner, signal: answer });
+        peerConnectionRef.current = pc;
+      } else {
+        socket.emit('joinCall', { room: activeChat.id, type: callType });
+      }
     } catch (err) {
       console.error('Failed to accept call:', err);
-      if (err.message === 'SECURE_CONTEXT_ERROR') {
-        alert('Microphone/Camera access requires a secure connection. Please use localhost or HTTPS.');
-      } else if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-        alert('Permission to access microphone/camera was denied. Please check your browser settings.');
-      } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
-        alert('No microphone or camera detected. Please check your device connections.');
-      } else {
-        alert(`Could not access microphone/camera: ${err.message || err.name}`);
-      }
+      alert(`Could not access microphone/camera: ${err.message || err.name}`);
       declineCall();
     }
   };
 
   const declineCall = () => {
-    socket.emit('declineCall', { to: callPartner });
+    if (activeChat.type === 'dm') {
+      socket.emit('declineCall', { to: callPartner });
+    }
     resetCallState();
   };
 
   const endCall = () => {
-    socket.emit('endCall', { to: callPartner });
+    if (activeChat.type === 'dm') {
+      socket.emit('endCall', { to: callPartner });
+    } else {
+      socket.emit('leaveCall', { room: activeChat.id });
+    }
     resetCallState();
   };
 
@@ -526,17 +581,39 @@ const Chat = ({ location, history }) => {
       });
     });
 
-    socket.on('callUser', ({ signal, from, type }) => {
-      setCallPartner(from);
-      setCallType(type);
-      setIncomingSignal(signal);
-      setCallState('incoming');
+    socket.on('callUser', async ({ signal, from, type }) => {
+      const currentActiveChat = activeChatRef.current;
+
+      if (callStateRef.current === 'connected' && currentActiveChat && currentActiveChat.type === 'group') {
+        try {
+          const pc = createPeerConnection(from.toLowerCase(), localStreamRef.current, callTypeRef.current);
+          await pc.setRemoteDescription(new RTCSessionDescription(signal));
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          socket.emit('answerCall', { to: from, signal: answer });
+        } catch (e) {
+          console.error('Error handling group call user offer:', e);
+        }
+      } else {
+        setCallPartner(from);
+        setCallType(type);
+        setIncomingSignal(signal);
+        setCallState('incoming');
+      }
     });
 
-    socket.on('callAccepted', async ({ signal }) => {
-      setCallState('connected');
-      if (peerConnectionRef.current) {
-        await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(signal));
+    socket.on('callAccepted', async ({ signal, from }) => {
+      const currentActiveChat = activeChatRef.current;
+      if (currentActiveChat && currentActiveChat.type === 'group' && from) {
+        const uName = from.toLowerCase();
+        if (peerConnectionsRef.current[uName]) {
+          await peerConnectionsRef.current[uName].setRemoteDescription(new RTCSessionDescription(signal));
+        }
+      } else {
+        setCallState('connected');
+        if (peerConnectionRef.current) {
+          await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(signal));
+        }
       }
     });
 
@@ -549,12 +626,24 @@ const Chat = ({ location, history }) => {
       resetCallState();
     });
 
-    socket.on('iceCandidate', async ({ candidate }) => {
-      if (peerConnectionRef.current) {
-        try {
-          await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(candidate));
-        } catch (e) {
-          console.error('Error adding received ice candidate', e);
+    socket.on('iceCandidate', async ({ candidate, from }) => {
+      const currentActiveChat = activeChatRef.current;
+      if (currentActiveChat && currentActiveChat.type === 'group' && from) {
+        const uName = from.toLowerCase();
+        if (peerConnectionsRef.current[uName]) {
+          try {
+            await peerConnectionsRef.current[uName].addIceCandidate(new RTCIceCandidate(candidate));
+          } catch (e) {
+            console.error('Error adding group ICE candidate', e);
+          }
+        }
+      } else {
+        if (peerConnectionRef.current) {
+          try {
+            await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(candidate));
+          } catch (e) {
+            console.error('Error adding received ice candidate', e);
+          }
         }
       }
     });
@@ -576,6 +665,56 @@ const Chat = ({ location, history }) => {
       });
     });
 
+    socket.on('roomMembers', ({ room, creator, members }) => {
+      const currentActiveChat = activeChatRef.current;
+      if (currentActiveChat && currentActiveChat.type === 'group' && currentActiveChat.id.toLowerCase() === room.toLowerCase()) {
+        setRoomMembers(members);
+        setRoomCreator(creator);
+      }
+    });
+
+    socket.on('callParticipantsUpdate', async ({ room, participants, joinedUser, leftUser, type }) => {
+      const currentActiveChat = activeChatRef.current;
+      const currentName = nameRef.current;
+
+      if (currentActiveChat && currentActiveChat.type === 'group' && currentActiveChat.id === room) {
+        setCallParticipants(participants);
+
+        if (leftUser) {
+          const uName = leftUser.toLowerCase();
+          if (peerConnectionsRef.current[uName]) {
+            peerConnectionsRef.current[uName].close();
+            delete peerConnectionsRef.current[uName];
+          }
+          setRemoteStreams(prev => {
+            const copy = { ...prev };
+            delete copy[uName];
+            return copy;
+          });
+        }
+
+        if (joinedUser && joinedUser.toLowerCase() === currentName.toLowerCase()) {
+          participants.forEach(async p => {
+            if (p.username.toLowerCase() !== currentName.toLowerCase()) {
+              try {
+                const pc = createPeerConnection(p.username.toLowerCase(), localStreamRef.current, type);
+                const offer = await pc.createOffer();
+                await pc.setLocalDescription(offer);
+                socket.emit('callUser', {
+                  userToCall: p.username,
+                  signalData: offer,
+                  from: currentName,
+                  type
+                });
+              } catch (err) {
+                console.error('Error creating offer for group participant:', err);
+              }
+            }
+          });
+        }
+      }
+    });
+
     return () => {
       socket.off('message');
       socket.off('editMessage');
@@ -592,6 +731,8 @@ const Chat = ({ location, history }) => {
       socket.off('iceCandidate');
       socket.off('chatDeleted');
       socket.off('messageReacted');
+      socket.off('roomMembers');
+      socket.off('callParticipantsUpdate');
     };
   }, []);
 
@@ -717,6 +858,10 @@ const Chat = ({ location, history }) => {
     setEditingMessage(null);
     setMessage('');
     
+    setRoomMembers([]);
+    setRoomCreator('admin');
+    setShowMembersDropdown(false);
+    
     const newRoom = chat.type === 'group' 
       ? chat.id 
       : getPrivateRoomId(name, chat.id);
@@ -728,16 +873,48 @@ const Chat = ({ location, history }) => {
     }));
 
     socket.emit('switchRoom', { newRoom }, (error) => {
-      if (error) alert(error);
+      if (error) {
+        alert(error);
+      } else {
+        if (chat.type === 'group' && !['general', 'random', 'tech'].includes(chat.id)) {
+          socket.emit('getRoomMembers', { roomName: chat.id });
+        }
+      }
     });
+  };
+
+  const handleToggleMembers = () => {
+    setShowMembersDropdown(prev => !prev);
+  };
+
+  const handleAddMember = (username) => {
+    socket.emit('addRoomMember', { roomName: activeChat.id, username }, (res) => {
+      if (res && res.error) {
+        alert(res.error);
+      }
+    });
+  };
+
+  const handleRemoveMember = (username) => {
+    if (window.confirm(`Are you sure you want to remove ${username} from the group?`)) {
+      socket.emit('removeRoomMember', { roomName: activeChat.id, username }, (res) => {
+        if (res && res.error) {
+          alert(res.error);
+        }
+      });
+    }
   };
 
   const handleSelectChatRef = useRef(handleSelectChat);
   handleSelectChatRef.current = handleSelectChat;
 
-  const handleCreateRoom = (roomName) => {
-    socket.emit('createRoom', { roomName }, () => {
-      handleSelectChat({ id: roomName, type: 'group' });
+  const handleCreateRoom = (roomName, members) => {
+    socket.emit('createRoom', { roomName, members }, (error) => {
+      if (error) {
+        alert(error);
+      } else {
+        handleSelectChat({ id: roomName, type: 'group' });
+      }
     });
   };
 
@@ -813,6 +990,17 @@ const Chat = ({ location, history }) => {
             room={activeChat.type === 'group' ? `#${activeChat.id}` : activeChat.id} 
             activeChat={activeChat}
             onStartCall={startCall}
+            currentName={name}
+            roomMembers={roomMembers}
+            roomCreator={roomCreator}
+            isCreator={roomCreator.toLowerCase() === name.toLowerCase()}
+            showMembersDropdown={showMembersDropdown}
+            onToggleMembers={handleToggleMembers}
+            onAddMember={handleAddMember}
+            onRemoveMember={handleRemoveMember}
+            availableToAddToGroup={allDMContacts.filter(
+              contact => !roomMembers.map(m => m.toLowerCase()).includes(contact.name.toLowerCase())
+            )}
           />
           
           <Messages 
@@ -878,16 +1066,36 @@ const Chat = ({ location, history }) => {
       {/* Outgoing or Active Call Overlay */}
       {(callState === 'calling' || callState === 'connected') && (
         <div className="callOverlay">
-          <div className={`activeCallBox ${callType}`}>
+          <div className={`activeCallBox ${callType} ${activeChat.type === 'group' ? 'groupCall' : ''}`}>
             {callType === 'video' ? (
               <div className="videoStreamsContainer">
-                {/* Remote Video */}
-                <video 
-                  ref={remoteVideoRef} 
-                  autoPlay 
-                  playsInline 
-                  className="remoteVideo"
-                />
+                {activeChat.type === 'dm' ? (
+                  <video 
+                    ref={remoteVideoRef} 
+                    autoPlay 
+                    playsInline 
+                    className="remoteVideo"
+                  />
+                ) : (
+                  <div className="groupVideoGrid">
+                    {Object.keys(remoteStreams).map(username => (
+                      <div key={username} className="groupVideoItem">
+                        <video
+                          ref={el => { if (el) el.srcObject = remoteStreams[username]; }}
+                          autoPlay
+                          playsInline
+                          className="groupVideo"
+                        />
+                        <span className="groupParticipantName">{username}</span>
+                      </div>
+                    ))}
+                    {Object.keys(remoteStreams).length === 0 && (
+                      <div className="groupCallWaiting">
+                        <p>Waiting for others to join...</p>
+                      </div>
+                    )}
+                  </div>
+                )}
                 
                 {/* Local Video (picture-in-picture) */}
                 {!isCameraOff && (
@@ -939,6 +1147,11 @@ const Chat = ({ location, history }) => {
                   <span className="callStatusText">
                     {callState === 'calling' ? 'Calling...' : `Voice Call - ${formatTime(callDuration)}`}
                   </span>
+                  {activeChat.type === 'group' && (
+                    <div className="groupVoiceParticipants">
+                      <p style={{ margin: '8px 0 0 0' }}>In call: {callParticipants.map(p => p.username).join(', ')}</p>
+                    </div>
+                  )}
                 </div>
                 
                 <div className="audioControls">

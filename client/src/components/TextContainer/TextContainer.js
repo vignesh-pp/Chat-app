@@ -40,16 +40,27 @@ const TextContainer = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [isCreatingRoom, setIsCreatingRoom] = useState(false);
   const [newRoomName, setNewRoomName] = useState('');
+  const [selectedMembers, setSelectedMembers] = useState([]);
 
   const currentUserTrimmed = currentName ? currentName.trim().toLowerCase() : '';
   const myAvatarBg = getAvatarColor(currentUserTrimmed);
   const myInitials = currentName ? currentName.slice(0, 2).toUpperCase() : 'ME';
 
+  const toggleMember = (username) => {
+    const uNameLower = username.toLowerCase();
+    if (selectedMembers.includes(uNameLower)) {
+      setSelectedMembers(selectedMembers.filter(m => m !== uNameLower));
+    } else {
+      setSelectedMembers([...selectedMembers, uNameLower]);
+    }
+  };
+
   const handleCreateRoomSubmit = (e) => {
-    e.preventDefault();
+    if (e) e.preventDefault();
     if (newRoomName.trim()) {
-      onCreateRoom(newRoomName.trim());
+      onCreateRoom(newRoomName.trim(), selectedMembers);
       setNewRoomName('');
+      setSelectedMembers([]);
       setIsCreatingRoom(false);
     }
   };
@@ -128,21 +139,7 @@ const TextContainer = ({
             </button>
           </div>
 
-          {/* Inline Room Creator Form */}
-          {isCreatingRoom && (
-            <form onSubmit={handleCreateRoomSubmit} className="roomCreatorForm">
-              <input 
-                type="text" 
-                placeholder="Group name..." 
-                value={newRoomName} 
-                onChange={(e) => setNewRoomName(e.target.value)} 
-                className="roomCreatorInput"
-                autoFocus
-              />
-              <button type="submit" className="roomCreatorBtn submit">✓</button>
-              <button type="button" onClick={() => setIsCreatingRoom(false)} className="roomCreatorBtn cancel">✕</button>
-            </form>
-          )}
+          {/* Room creator modal is rendered at the bottom of the container */}
 
           <div className="itemsList">
             {filteredRooms.map((roomName) => {
@@ -229,6 +226,100 @@ const TextContainer = ({
           <span>AetherChat Workspace</span>
         </div>
       </div>
+
+      {isCreatingRoom && (
+        <div className="groupModalOverlay">
+          <div className="groupModalCard">
+            <h3 className="groupModalTitle">Create New Group</h3>
+            
+            <input 
+              type="text" 
+              placeholder="Group name..." 
+              value={newRoomName} 
+              onChange={(e) => setNewRoomName(e.target.value)} 
+              className="groupModalInput"
+              autoFocus
+            />
+            
+            <div className="memberSelectionHeader">
+              Selected Members ({selectedMembers.length})
+            </div>
+            
+            <div className="selectedMembersContainer">
+              {selectedMembers.length === 0 ? (
+                <span className="noItemsText" style={{ fontSize: '0.75rem', padding: '4px' }}>No members added yet</span>
+              ) : (
+                selectedMembers.map(m => (
+                  <div key={m} className="selectedMemberChip">
+                    <span>{m}</span>
+                    <button 
+                      type="button" 
+                      onClick={() => toggleMember(m)} 
+                      className="removeMemberBtn"
+                      title="Remove"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="memberSelectionHeader">
+              Add Members
+            </div>
+
+            <div className="contactsSelectionList">
+              {(dmContacts || []).map(contact => {
+                const contactLower = contact.name.toLowerCase();
+                const isSelected = selectedMembers.includes(contactLower);
+                return (
+                  <div key={contact.name} className={`contactSelectionItem ${isSelected ? 'selected' : ''}`}>
+                    <div className="contactSelectionInfo">
+                      <div className="avatarCircle small" style={{ backgroundColor: getAvatarColor(contactLower), width: '24px', height: '24px', fontSize: '0.65rem' }}>
+                        {contact.name.slice(0, 2).toUpperCase()}
+                      </div>
+                      <span className="contactSelectionName">{contact.name}</span>
+                    </div>
+                    <button 
+                      type="button" 
+                      onClick={() => toggleMember(contactLower)} 
+                      className={`memberActionBtn ${isSelected ? 'remove' : 'add'}`}
+                    >
+                      {isSelected ? 'Remove' : 'Add'}
+                    </button>
+                  </div>
+                );
+              })}
+              {(dmContacts || []).length === 0 && (
+                <div className="noItemsText" style={{ fontSize: '0.75rem', textAlign: 'center', padding: '10px' }}>No contacts available</div>
+              )}
+            </div>
+
+            <div className="groupModalActions">
+              <button 
+                type="button" 
+                onClick={() => {
+                  setIsCreatingRoom(false);
+                  setNewRoomName('');
+                  setSelectedMembers([]);
+                }} 
+                className="groupModalBtn cancel"
+              >
+                Cancel
+              </button>
+              <button 
+                type="button" 
+                onClick={() => handleCreateRoomSubmit()} 
+                className="groupModalBtn create"
+                disabled={!newRoomName.trim()}
+              >
+                Create
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
