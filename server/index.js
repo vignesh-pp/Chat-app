@@ -3,6 +3,8 @@ const express = require('express');
 const socketio = require('socket.io');
 const cors = require('cors');
 
+const nodemailer = require('nodemailer');
+
 const { addUser, removeUser, getUser, getUsersInRoom, getAllUsers } = require('./users');
 
 const router = require('./router');
@@ -12,6 +14,7 @@ const server = http.createServer(app);
 const io = socketio(server);
 
 app.use(cors());
+app.use(express.json());
 app.use(router);
 
 const rooms = ['general', 'random', 'tech'];
@@ -303,6 +306,107 @@ io.on('connect', (socket) => {
       io.emit('allUsers', { users: getAllUsers() });
     }
   })
+});
+
+const otps = {};
+let transporter;
+
+const getTransporter = async () => {
+  if (transporter) return transporter;
+  
+  try {
+    const testAccount = await nodemailer.createTestAccount();
+    transporter = nodemailer.createTransport({
+      host: 'smtp.ethereal.email',
+      port: 587,
+      secure: false,
+      auth: {
+        user: testAccount.user,
+        pass: testAccount.pass
+      }
+    });
+    console.log('Ethereal SMTP transport created successfully.');
+  } catch (err) {
+    console.error('Failed to create Ethereal SMTP account, using mock transport.', err);
+    transporter = {
+      sendMail: async (mailOptions) => {
+        console.log(`[MOCK EMAIL] To: ${mailOptions.to}, Subject: ${mailOptions.subject}`);
+        console.log(`[MOCK EMAIL] Body:\n${mailOptions.text}`);
+        return { messageId: 'mock-id' };
+      }
+    };
+  }
+  return transporter;
+};
+
+app.post('/api/send-otp', async (req, res) => {
+  const { email } = req.body;
+  if (!email) return res.status(400).json({ error: 'Email is required.' });
+
+  const formattedEmail = email.trim().toLowerCase();
+  const otp = Math.floor(100000 + Math.random() * 900000).toString();
+  
+  otps[formattedEmail] = {
+    otp,
+    expires: Date.now() + 5 * 60 * 1000
+  };
+
+  try {
+    const tx = await getTransporter();
+    const info = await tx.sendMail({
+      from: '"AetherChat Verification" <verify@aetherchat.com>',
+      to: formattedEmail,
+      subject: 'AetherChat Registration OTP',
+      text: `Your verification OTP is: ${otp}. It is valid for 5 minutes.`,
+      html: `<div style="font-family: Arial, sans-serif; padding: 20px; border-radius: 12px; background-color: #f8fafc; border: 1px solid #e2e8f0; max-width: 500px;">
+        <h2 style="color: #6366f1; margin-top: 0;">AetherChat Verification Code</h2>
+        <p style="color: #334155; font-size: 1rem;">Thank you for registering. Please use the following One-Time Password (OTP) to complete your signup process:</p>
+        <div style="font-size: 2rem; font-weight: 700; color: #1e1b4b; background-color: #e0e7ff; padding: 12px 24px; border-radius: 8px; text-align: center; margin: 20px 0; letter-spacing: 4px;">
+          ${otp}
+        </div>
+        <p style="color: #64748b; font-size: 0.85rem; margin-bottom: 0;">This OTP will expire in 5 minutes. If you did not request this code, please ignore this email.</p>
+      </div>`
+    });
+
+    console.log(`[OTP SENT] Email: ${formattedEmail}, OTP: ${otp}`);
+    
+    let previewUrl = '';
+    if (typeof nodemailer.getTestMessageUrl === 'function') {
+      previewUrl = nodemailer.getTestMessageUrl(info);
+      if (previewUrl) {
+        console.log(`[Ethereal Preview URL] ${previewUrl}`);
+      }
+    }
+
+    res.json({ success: true, previewUrl });
+  } catch (err) {
+    console.error('Error sending OTP email:', err);
+    res.status(500).json({ error: 'Failed to send verification email. Please check the server console.' });
+  }
+});
+
+app.post('/api/verify-otp', (req, res) => {
+  const { email, otp } = req.body;
+  if (!email || !otp) return res.status(400).json({ error: 'Email and OTP are required.' });
+
+  const formattedEmail = email.trim().toLowerCase();
+  const record = otps[formattedEmail];
+
+  if (!record) {
+    return res.status(400).json({ error: 'No OTP requested for this email.' });
+  }
+
+  if (Date.now() > record.expires) {
+    delete otps[formattedEmail];
+    return res.status(400).json({ error: 'OTP has expired.' });
+  }
+
+  if (record.otp !== otp.trim()) {
+    return res.status(400).json({ error: 'Invalid verification code.' });
+  }
+
+  delete otps[formattedEmail];
+  res.json({ success: true });
 });
 
 server.listen(process.env.PORT || 5000, () => console.log(`Server has started.`));
