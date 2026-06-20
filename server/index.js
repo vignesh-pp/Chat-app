@@ -15,6 +15,7 @@ app.use(cors());
 app.use(router);
 
 const rooms = ['general', 'random', 'tech'];
+const messagesByRoom = {};
 
 const getPrivateRoomId = (userA, userB) => {
   const sorted = [userA.trim().toLowerCase(), userB.trim().toLowerCase()].sort();
@@ -40,6 +41,26 @@ io.on('connect', (socket) => {
     // Broadcast updated directories
     io.emit('allUsers', { users: getAllUsers() });
     socket.emit('allRooms', { rooms });
+
+    const myNameLower = user.name.trim().toLowerCase();
+    const userPrivateRooms = Object.keys(messagesByRoom).filter(rk => {
+      if (rk.startsWith('private_')) {
+        const parts = rk.replace('private_', '').split('_');
+        return parts.includes(myNameLower);
+      }
+      return false;
+    });
+
+    const initMessages = {};
+    initMessages['general'] = messagesByRoom['general'] || [];
+    rooms.forEach(r => {
+      initMessages[r] = messagesByRoom[r] || [];
+    });
+    userPrivateRooms.forEach(rk => {
+      initMessages[rk] = messagesByRoom[rk] || [];
+    });
+
+    socket.emit('initMessages', initMessages);
 
     callback();
   });
@@ -96,6 +117,10 @@ io.on('connect', (socket) => {
         time
       };
 
+      // Save to server history
+      if (!messagesByRoom[roomKey]) messagesByRoom[roomKey] = [];
+      messagesByRoom[roomKey].push(payload);
+
       // Send to sender
       socket.emit('message', payload);
 
@@ -108,14 +133,20 @@ io.on('connect', (socket) => {
       const isImageVal = typeof messageData === 'object' ? messageData.isImage : false;
       const idVal = typeof messageData === 'object' ? messageData.id : (Date.now() + Math.random().toString(36).substr(2, 9));
 
-      io.to(user.room).emit('message', {
+      const payload = {
         id: idVal,
         user: user.name,
         text: textVal,
         isImage: isImageVal,
         room: user.room,
         time
-      });
+      };
+
+      // Save to server history
+      if (!messagesByRoom[user.room]) messagesByRoom[user.room] = [];
+      messagesByRoom[user.room].push(payload);
+
+      io.to(user.room).emit('message', payload);
     }
 
     callback();
@@ -126,11 +157,12 @@ io.on('connect', (socket) => {
     if (!user) return callback({ error: 'User not found' });
 
     const payload = { messageId, newText };
+    let roomKey;
 
     if (type === 'dm' && recipient) {
       const recipientName = recipient.trim().toLowerCase();
       const recipientUser = getAllUsers().find(u => u.name === recipientName);
-      const roomKey = getPrivateRoomId(user.name, recipientName);
+      roomKey = getPrivateRoomId(user.name, recipientName);
 
       payload.room = roomKey;
 
@@ -140,8 +172,18 @@ io.on('connect', (socket) => {
       }
     } else {
       const targetRoom = room || user.room;
+      roomKey = targetRoom;
       payload.room = targetRoom;
       io.to(targetRoom).emit('editMessage', payload);
+    }
+
+    // Save edit in server history
+    if (roomKey && messagesByRoom[roomKey]) {
+      const msg = messagesByRoom[roomKey].find(m => m.id === messageId);
+      if (msg) {
+        msg.text = newText;
+        msg.isEdited = true;
+      }
     }
 
     callback();
@@ -152,11 +194,12 @@ io.on('connect', (socket) => {
     if (!user) return callback({ error: 'User not found' });
 
     const payload = { messageId };
+    let roomKey;
 
     if (type === 'dm' && recipient) {
       const recipientName = recipient.trim().toLowerCase();
       const recipientUser = getAllUsers().find(u => u.name === recipientName);
-      const roomKey = getPrivateRoomId(user.name, recipientName);
+      roomKey = getPrivateRoomId(user.name, recipientName);
 
       payload.room = roomKey;
 
@@ -166,8 +209,18 @@ io.on('connect', (socket) => {
       }
     } else {
       const targetRoom = room || user.room;
+      roomKey = targetRoom;
       payload.room = targetRoom;
       io.to(targetRoom).emit('deleteMessage', payload);
+    }
+
+    // Save delete in server history
+    if (roomKey && messagesByRoom[roomKey]) {
+      const msg = messagesByRoom[roomKey].find(m => m.id === messageId);
+      if (msg) {
+        msg.text = 'This message was deleted';
+        msg.isDeleted = true;
+      }
     }
 
     callback();

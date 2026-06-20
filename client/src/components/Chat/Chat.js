@@ -20,15 +20,50 @@ const getPrivateRoomId = (userA, userB) => {
 
 const Chat = ({ location, history }) => {
   const [theme, setTheme] = useState(() => localStorage.getItem('aether-theme') || 'dark');
-  const [name, setName] = useState('');
+  const [name, setName] = useState(() => {
+    const { name } = queryString.parse((location && location.search) || '');
+    if (name) return name.trim();
+    const sessionUser = localStorage.getItem('aether_session');
+    return sessionUser ? sessionUser.trim() : '';
+  });
   const [activeChat, setActiveChat] = useState({ id: 'general', type: 'group' });
   const [users, setUsers] = useState([]);
   const [rooms, setRooms] = useState(['general', 'random', 'tech']);
   const [message, setMessage] = useState('');
-  const [messagesByChat, setMessagesByChat] = useState({});
+  const [messagesByChat, setMessagesByChat] = useState(() => {
+    const { name } = queryString.parse((location && location.search) || '');
+    const sessionUser = localStorage.getItem('aether_session');
+    const activeName = name || sessionUser;
+    if (activeName) {
+      const stored = localStorage.getItem(`aether_messages_${activeName.trim().toLowerCase()}`);
+      return stored ? JSON.parse(stored) : {};
+    }
+    return {};
+  });
+
+  useEffect(() => {
+    if (name) {
+      localStorage.setItem(`aether_messages_${name.trim().toLowerCase()}`, JSON.stringify(messagesByChat));
+    }
+  }, [messagesByChat, name]);
   const [typingStatus, setTypingStatus] = useState('');
   const [editingMessage, setEditingMessage] = useState(null);
-  const [unreadCounts, setUnreadCounts] = useState({});
+  const [unreadCounts, setUnreadCounts] = useState(() => {
+    const { name } = queryString.parse((location && location.search) || '');
+    const sessionUser = localStorage.getItem('aether_session');
+    const activeName = name || sessionUser;
+    if (activeName) {
+      const stored = localStorage.getItem(`aether_unread_${activeName.trim().toLowerCase()}`);
+      return stored ? JSON.parse(stored) : {};
+    }
+    return {};
+  });
+
+  useEffect(() => {
+    if (name) {
+      localStorage.setItem(`aether_unread_${name.trim().toLowerCase()}`, JSON.stringify(unreadCounts));
+    }
+  }, [unreadCounts, name]);
 
   const typingTimeoutRef = useRef(null);
   const isTypingRef = useRef(false);
@@ -151,6 +186,37 @@ const Chat = ({ location, history }) => {
       }
     });
 
+    socket.on('initMessages', initMessages => {
+      setUnreadCounts(prevUnread => {
+        const updatedUnread = { ...prevUnread };
+        setMessagesByChat(prevMsgs => {
+          const updatedMsgs = { ...prevMsgs };
+          
+          Object.keys(initMessages).forEach(roomKey => {
+            const serverMsgs = initMessages[roomKey] || [];
+            const localMsgs = prevMsgs[roomKey] || [];
+            
+            if (serverMsgs.length > localMsgs.length) {
+              const diffCount = serverMsgs.length - localMsgs.length;
+              const currentActiveChat = activeChatRef.current;
+              const currentName = nameRef.current;
+              const currentActiveRoomId = currentActiveChat.type === 'group'
+                ? currentActiveChat.id
+                : getPrivateRoomId(currentName, currentActiveChat.id);
+
+              if (roomKey !== currentActiveRoomId) {
+                updatedUnread[roomKey] = (updatedUnread[roomKey] || 0) + diffCount;
+              }
+            }
+            updatedMsgs[roomKey] = serverMsgs;
+          });
+          
+          return updatedMsgs;
+        });
+        return updatedUnread;
+      });
+    });
+
     return () => {
       socket.off('message');
       socket.off('editMessage');
@@ -159,6 +225,7 @@ const Chat = ({ location, history }) => {
       socket.off('allRooms');
       socket.off('typing');
       socket.off('stopTyping');
+      socket.off('initMessages');
     };
   }, []);
 
