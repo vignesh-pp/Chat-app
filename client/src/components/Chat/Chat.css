@@ -172,3 +172,311 @@
   background: #ef4444;
   color: #ffffff;
 }
+
+/* WebRTC Calling CSS styling */
+.callOverlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(10, 13, 20, 0.85);
+  backdrop-filter: blur(12px);
+  z-index: 10000;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  animation: fadeIn 0.3s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.incomingCallBox {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 30px 40px;
+  border-radius: 24px;
+  text-align: center;
+  color: #ffffff;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  max-width: 400px;
+  width: 90%;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+  animation: scaleUp 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes scaleUp {
+  from { transform: scale(0.9); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+.callerAvatar {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  background: #6366f1;
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 2rem;
+  font-weight: 700;
+  margin-bottom: 20px;
+  box-shadow: 0 8px 24px rgba(99, 102, 241, 0.4);
+}
+
+.callerAvatar.pulsing {
+  animation: callPulse 1.8s infinite ease-in-out;
+}
+
+@keyframes callPulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.6);
+  }
+  70% {
+    box-shadow: 0 0 0 20px rgba(99, 102, 241, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(99, 102, 241, 0);
+  }
+}
+
+.incomingCallBox h3 {
+  margin: 0 0 8px 0;
+  font-size: 1.4rem;
+  font-weight: 600;
+}
+
+.incomingCallBox p {
+  color: #94a3b8;
+  margin: 0 0 24px 0;
+  font-size: 0.95rem;
+}
+
+.callActions {
+  display: flex;
+  gap: 16px;
+  width: 100%;
+}
+
+.callAcceptBtn, .callDeclineBtn {
+  flex: 1;
+  padding: 12px 20px;
+  border-radius: 12px;
+  border: none;
+  font-weight: 600;
+  font-size: 0.95rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: all 0.2s ease;
+  font-family: inherit;
+}
+
+.callAcceptBtn {
+  background: #10b981;
+  color: #ffffff;
+}
+
+.callAcceptBtn:hover {
+  background: #059669;
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+}
+
+.callDeclineBtn {
+  background: #ef4444;
+  color: #ffffff;
+}
+
+.callDeclineBtn:hover {
+  background: #dc2626;
+  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);
+}
+
+/* Active Call Styles */
+.activeCallBox {
+  background: #0f172a;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 24px;
+  overflow: hidden;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+  animation: scaleUp 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  display: flex;
+  flex-direction: column;
+}
+
+.activeCallBox.video {
+  width: 640px;
+  max-width: 95vw;
+  height: 480px;
+  max-height: 80vh;
+}
+
+.activeCallBox.audio {
+  width: 320px;
+  padding: 40px 30px;
+  align-items: center;
+  text-align: center;
+}
+
+.videoStreamsContainer {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background: #000000;
+}
+
+.remoteVideo {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.localVideo {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  width: 120px;
+  height: 90px;
+  border-radius: 12px;
+  object-fit: cover;
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.3);
+  z-index: 10;
+}
+
+.videoOverlayControls {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(to top, rgba(15, 23, 42, 0.9) 0%, rgba(15, 23, 42, 0) 100%);
+  padding: 30px 24px 20px 24px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  z-index: 20;
+}
+
+.callTitleInfo h3 {
+  margin: 0;
+  color: #ffffff;
+  font-size: 1.1rem;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.callTitleInfo span {
+  color: #94a3b8;
+  font-size: 0.85rem;
+}
+
+.callControlButtons {
+  display: flex;
+  gap: 12px;
+}
+
+.controlBtn {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  padding: 0;
+}
+
+.controlBtn:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.controlBtn.active {
+  background: #f59e0b;
+  border-color: #f59e0b;
+}
+
+.controlBtn.active:hover {
+  background: #d97706;
+}
+
+.controlBtn.endCallBtn {
+  background: #ef4444;
+  border-color: #ef4444;
+}
+
+.controlBtn.endCallBtn:hover {
+  background: #dc2626;
+  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.4);
+}
+
+/* Audio Call Layout */
+.audioCallContainer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+}
+
+.audioCallerInfo {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-bottom: 30px;
+}
+
+.audioCallerInfo h3 {
+  color: #ffffff;
+  font-size: 1.3rem;
+  margin: 0 0 4px 0;
+  text-transform: capitalize;
+}
+
+.callStatusText {
+  color: #94a3b8;
+  font-size: 0.88rem;
+}
+
+.audioControls {
+  display: flex;
+  gap: 20px;
+}
+
+/* Call actions in DM Header */
+.callActionButtons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-right: 12px;
+}
+
+.callBtn {
+  background: var(--input-bg);
+  border: 1px solid var(--border-color);
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.callBtn:hover {
+  color: #6366f1;
+  background: rgba(99, 102, 241, 0.1);
+  border-color: rgba(99, 102, 241, 0.3);
+}

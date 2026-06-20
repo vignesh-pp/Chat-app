@@ -71,6 +71,308 @@ const Chat = ({ location, history }) => {
   const activeChatRef = useRef(activeChat);
   const nameRef = useRef(name);
 
+  // WebRTC Calling States & Refs
+  const peerConnectionRef = useRef(null);
+  const localStreamRef = useRef(null);
+  const remoteStreamRef = useRef(null);
+  const localVideoRef = useRef(null);
+  const remoteVideoRef = useRef(null);
+  const [callState, setCallState] = useState('idle'); // 'idle' | 'calling' | 'incoming' | 'connected'
+  const [callType, setCallType] = useState('audio'); // 'audio' | 'video'
+  const [callPartner, setCallPartner] = useState('');
+  const [incomingSignal, setIncomingSignal] = useState(null);
+  const [isMuted, setIsMuted] = useState(false);
+  const [isCameraOff, setIsCameraOff] = useState(false);
+  const [callDuration, setCallDuration] = useState(0);
+
+  const callPartnerRef = useRef('');
+  useEffect(() => {
+    callPartnerRef.current = callPartner;
+  }, [callPartner]);
+
+  const playOutgoingRing = (context) => {
+    const osc1 = context.createOscillator();
+    const osc2 = context.createOscillator();
+    const gainNode = context.createGain();
+
+    osc1.type = 'sine';
+    osc2.type = 'sine';
+    osc1.frequency.setValueAtTime(440, context.currentTime);
+    osc2.frequency.setValueAtTime(480, context.currentTime);
+
+    gainNode.gain.setValueAtTime(0, context.currentTime);
+    gainNode.gain.linearRampToValueAtTime(0.08, context.currentTime + 0.1);
+    gainNode.gain.setValueAtTime(0.08, context.currentTime + 1.5);
+    gainNode.gain.linearRampToValueAtTime(0, context.currentTime + 2.0);
+
+    osc1.connect(gainNode);
+    osc2.connect(gainNode);
+    gainNode.connect(context.destination);
+
+    osc1.start();
+    osc2.start();
+    osc1.stop(context.currentTime + 2.0);
+    osc2.stop(context.currentTime + 2.0);
+  };
+
+  const playIncomingRing = (context) => {
+    const notes = [261.63, 329.63, 392.00, 493.88]; // C4, E4, G4, B4
+    notes.forEach((freq, idx) => {
+      const osc = context.createOscillator();
+      const gainNode = context.createGain();
+
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(freq, context.currentTime + idx * 0.15);
+
+      gainNode.gain.setValueAtTime(0, context.currentTime + idx * 0.15);
+      gainNode.gain.linearRampToValueAtTime(0.05, context.currentTime + idx * 0.15 + 0.05);
+      gainNode.gain.exponentialRampToValueAtTime(0.001, context.currentTime + idx * 0.15 + 0.4);
+
+      osc.connect(gainNode);
+      gainNode.connect(context.destination);
+
+      osc.start(context.currentTime + idx * 0.15);
+      osc.stop(context.currentTime + idx * 0.15 + 0.45);
+    });
+  };
+
+  useEffect(() => {
+    let soundInterval;
+    let ctx;
+    
+    if (callState === 'calling') {
+      try {
+        ctx = new (window.AudioContext || window.webkitAudioContext)();
+        playOutgoingRing(ctx);
+        soundInterval = setInterval(() => {
+          if (ctx && ctx.state === 'suspended') ctx.resume();
+          playOutgoingRing(ctx);
+        }, 4000);
+      } catch (e) {
+        console.error('Failed to play calling sound', e);
+      }
+    } else if (callState === 'incoming') {
+      try {
+        ctx = new (window.AudioContext || window.webkitAudioContext)();
+        playIncomingRing(ctx);
+        soundInterval = setInterval(() => {
+          if (ctx && ctx.state === 'suspended') ctx.resume();
+          playIncomingRing(ctx);
+        }, 1500);
+      } catch (e) {
+        console.error('Failed to play ringtone sound', e);
+      }
+    }
+
+    return () => {
+      if (soundInterval) clearInterval(soundInterval);
+      if (ctx) {
+        ctx.close();
+      }
+    };
+  }, [callState]);
+
+  useEffect(() => {
+    let timer;
+    if (callState === 'connected') {
+      timer = setInterval(() => {
+        setCallDuration(prev => prev + 1);
+      }, 1000);
+    } else {
+      setCallDuration(0);
+    }
+    return () => clearInterval(timer);
+  }, [callState]);
+
+  const formatTime = (secs) => {
+    const minutes = Math.floor(secs / 60);
+    const seconds = secs % 60;
+    return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+  };
+
+  const resetCallState = () => {
+    if (peerConnectionRef.current) {
+      peerConnectionRef.current.close();
+      peerConnectionRef.current = null;
+    }
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach(track => track.stop());
+      localStreamRef.current = null;
+    }
+    remoteStreamRef.current = null;
+    setCallState('idle');
+    setCallPartner('');
+    setIncomingSignal(null);
+    setIsMuted(false);
+    setIsCameraOff(false);
+    setCallDuration(0);
+  };
+
+  const getMediaStream = async (type) => {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      throw new Error('SECURE_CONTEXT_ERROR');
+    }
+    try {
+      return await navigator.mediaDevices.getUserMedia({
+        audio: true,
+        video: type === 'video'
+      });
+    } catch (err) {
+      if (type === 'video' && (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError')) {
+        console.warn('Webcam not found, falling back to audio only');
+        alert('Webcam not detected. Starting voice call instead.');
+        setCallType('audio');
+        return await navigator.mediaDevices.getUserMedia({
+          audio: true,
+          video: false
+        });
+      }
+      throw err;
+    }
+  };
+
+  const startCall = async (type) => {
+    setCallType(type);
+    setCallPartner(activeChat.id);
+    setCallState('calling');
+    setIsMuted(false);
+    setIsCameraOff(false);
+
+    try {
+      const stream = await getMediaStream(type);
+      localStreamRef.current = stream;
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = stream;
+      }
+
+      const pc = new RTCPeerConnection({
+        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+      });
+
+      stream.getTracks().forEach(track => pc.addTrack(track, stream));
+
+      pc.onicecandidate = (event) => {
+        if (event.candidate) {
+          socket.emit('iceCandidate', { to: activeChat.id, candidate: event.candidate });
+        }
+      };
+
+      pc.ontrack = (event) => {
+        remoteStreamRef.current = event.streams[0];
+        if (remoteVideoRef.current) {
+          remoteVideoRef.current.srcObject = event.streams[0];
+        }
+      };
+
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+
+      socket.emit('callUser', {
+        userToCall: activeChat.id,
+        signalData: offer,
+        from: name,
+        type: type === 'video' && stream.getVideoTracks().length > 0 ? 'video' : 'audio'
+      });
+
+      peerConnectionRef.current = pc;
+    } catch (err) {
+      console.error('Failed to get media devices:', err);
+      if (err.message === 'SECURE_CONTEXT_ERROR') {
+        alert('Microphone/Camera access requires a secure connection. Please use localhost or HTTPS.');
+      } else if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+        alert('Permission to access microphone/camera was denied. Please check your browser settings.');
+      } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+        alert('No microphone or camera detected. Please check your device connections.');
+      } else {
+        alert(`Could not access microphone/camera: ${err.message || err.name}`);
+      }
+      endCall();
+    }
+  };
+
+  const acceptCall = async () => {
+    setCallState('connected');
+    try {
+      const stream = await getMediaStream(callType);
+      localStreamRef.current = stream;
+
+      setTimeout(() => {
+        if (localVideoRef.current) {
+          localVideoRef.current.srcObject = stream;
+        }
+        if (remoteVideoRef.current && remoteStreamRef.current) {
+          remoteVideoRef.current.srcObject = remoteStreamRef.current;
+        }
+      }, 100);
+
+      const pc = new RTCPeerConnection({
+        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+      });
+
+      stream.getTracks().forEach(track => pc.addTrack(track, stream));
+
+      pc.onicecandidate = (event) => {
+        if (event.candidate) {
+          socket.emit('iceCandidate', { to: callPartner, candidate: event.candidate });
+        }
+      };
+
+      pc.ontrack = (event) => {
+        remoteStreamRef.current = event.streams[0];
+        if (remoteVideoRef.current) {
+          remoteVideoRef.current.srcObject = event.streams[0];
+        }
+      };
+
+      await pc.setRemoteDescription(new RTCSessionDescription(incomingSignal));
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+
+      socket.emit('answerCall', { to: callPartner, signal: answer });
+      peerConnectionRef.current = pc;
+    } catch (err) {
+      console.error('Failed to accept call:', err);
+      if (err.message === 'SECURE_CONTEXT_ERROR') {
+        alert('Microphone/Camera access requires a secure connection. Please use localhost or HTTPS.');
+      } else if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+        alert('Permission to access microphone/camera was denied. Please check your browser settings.');
+      } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+        alert('No microphone or camera detected. Please check your device connections.');
+      } else {
+        alert(`Could not access microphone/camera: ${err.message || err.name}`);
+      }
+      declineCall();
+    }
+  };
+
+  const declineCall = () => {
+    socket.emit('declineCall', { to: callPartner });
+    resetCallState();
+  };
+
+  const endCall = () => {
+    socket.emit('endCall', { to: callPartner });
+    resetCallState();
+  };
+
+  const toggleMute = () => {
+    if (localStreamRef.current) {
+      localStreamRef.current.getAudioTracks().forEach(track => {
+        track.enabled = !track.enabled;
+      });
+      setIsMuted(!isMuted);
+    }
+  };
+
+  const toggleCamera = () => {
+    if (localStreamRef.current) {
+      localStreamRef.current.getVideoTracks().forEach(track => {
+        track.enabled = !track.enabled;
+      });
+      setIsCameraOff(!isCameraOff);
+    }
+  };
+
   useEffect(() => {
     activeChatRef.current = activeChat;
   }, [activeChat]);
@@ -217,6 +519,39 @@ const Chat = ({ location, history }) => {
       });
     });
 
+    socket.on('callUser', ({ signal, from, type }) => {
+      setCallPartner(from);
+      setCallType(type);
+      setIncomingSignal(signal);
+      setCallState('incoming');
+    });
+
+    socket.on('callAccepted', async ({ signal }) => {
+      setCallState('connected');
+      if (peerConnectionRef.current) {
+        await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(signal));
+      }
+    });
+
+    socket.on('callDeclined', () => {
+      alert(`${callPartnerRef.current} declined the call.`);
+      resetCallState();
+    });
+
+    socket.on('endCall', () => {
+      resetCallState();
+    });
+
+    socket.on('iceCandidate', async ({ candidate }) => {
+      if (peerConnectionRef.current) {
+        try {
+          await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(candidate));
+        } catch (e) {
+          console.error('Error adding received ice candidate', e);
+        }
+      }
+    });
+
     return () => {
       socket.off('message');
       socket.off('editMessage');
@@ -226,6 +561,11 @@ const Chat = ({ location, history }) => {
       socket.off('typing');
       socket.off('stopTyping');
       socket.off('initMessages');
+      socket.off('callUser');
+      socket.off('callAccepted');
+      socket.off('callDeclined');
+      socket.off('endCall');
+      socket.off('iceCandidate');
     };
   }, []);
 
@@ -390,7 +730,11 @@ const Chat = ({ location, history }) => {
           unreadCounts={unreadCounts}
         />
         <div className="container">
-          <InfoBar room={activeChat.type === 'group' ? `#${activeChat.id}` : activeChat.id} />
+          <InfoBar 
+            room={activeChat.type === 'group' ? `#${activeChat.id}` : activeChat.id} 
+            activeChat={activeChat}
+            onStartCall={startCall}
+          />
           
           <Messages 
             messages={currentMessages} 
@@ -427,6 +771,114 @@ const Chat = ({ location, history }) => {
           />
         </div>
       </div>
+
+      {/* Incoming Call Dialog Overlay */}
+      {callState === 'incoming' && (
+        <div className="callOverlay">
+          <div className="incomingCallBox">
+            <div className="callerAvatar">
+              {callPartner.slice(0, 2).toUpperCase()}
+            </div>
+            <h3>Incoming {callType === 'video' ? 'Video' : 'Voice'} Call</h3>
+            <p>{callPartner} is calling you...</p>
+            <div className="callActions">
+              <button onClick={acceptCall} className="callAcceptBtn">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path></svg>
+                Accept
+              </button>
+              <button onClick={declineCall} className="callDeclineBtn">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                Decline
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Outgoing or Active Call Overlay */}
+      {(callState === 'calling' || callState === 'connected') && (
+        <div className="callOverlay">
+          <div className={`activeCallBox ${callType}`}>
+            {callType === 'video' ? (
+              <div className="videoStreamsContainer">
+                {/* Remote Video */}
+                <video 
+                  ref={remoteVideoRef} 
+                  autoPlay 
+                  playsInline 
+                  className="remoteVideo"
+                />
+                
+                {/* Local Video (picture-in-picture) */}
+                {!isCameraOff && (
+                  <video 
+                    ref={localVideoRef} 
+                    autoPlay 
+                    playsInline 
+                    muted 
+                    className="localVideo"
+                  />
+                )}
+                
+                <div className="videoOverlayControls">
+                  <div className="callTitleInfo">
+                    <h3>{callPartner}</h3>
+                    <span>{callState === 'calling' ? 'Calling...' : formatTime(callDuration)}</span>
+                  </div>
+                  
+                  <div className="callControlButtons">
+                    <button onClick={toggleMute} className={`controlBtn ${isMuted ? 'active' : ''}`} title="Mute/Unmute">
+                      {isMuted ? (
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="1" y1="1" x2="23" y2="23"></line><path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"></path><path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>
+                      ) : (
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>
+                      )}
+                    </button>
+                    
+                    <button onClick={toggleCamera} className={`controlBtn ${isCameraOff ? 'active' : ''}`} title="Camera ON/OFF">
+                      {isCameraOff ? (
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 16v1a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2m5.66 0H14a2 2 0 0 1 2 2v3.34l1 1L23 7v10"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>
+                      ) : (
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M23 7l-7 5 7 5V7z"></path><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>
+                      )}
+                    </button>
+                    
+                    <button onClick={endCall} className="controlBtn endCallBtn" title="End Call">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91"></path></svg>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="audioCallContainer">
+                <div className="audioCallerInfo">
+                  <div className="callerAvatar pulsing">
+                    {callPartner.slice(0, 2).toUpperCase()}
+                  </div>
+                  <h3>{callPartner}</h3>
+                  <span className="callStatusText">
+                    {callState === 'calling' ? 'Calling...' : `Voice Call - ${formatTime(callDuration)}`}
+                  </span>
+                </div>
+                
+                <div className="audioControls">
+                  <button onClick={toggleMute} className={`controlBtn ${isMuted ? 'active' : ''}`} title="Mute/Unmute">
+                    {isMuted ? (
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="1" y1="1" x2="23" y2="23"></line><path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"></path><path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>
+                    ) : (
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>
+                    )}
+                  </button>
+                  
+                  <button onClick={endCall} className="controlBtn endCallBtn" title="End Call">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91"></path></svg>
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

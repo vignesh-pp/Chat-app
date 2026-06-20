@@ -258,6 +258,41 @@ io.on('connect', (socket) => {
     }
   });
 
+  socket.on('callUser', ({ userToCall, signalData, from, type }) => {
+    const recipientUser = getAllUsers().find(u => u.name === userToCall.trim().toLowerCase());
+    if (recipientUser) {
+      io.to(recipientUser.id).emit('callUser', { signal: signalData, from, type });
+    }
+  });
+
+  socket.on('answerCall', ({ to, signal }) => {
+    const callerUser = getAllUsers().find(u => u.name === to.trim().toLowerCase());
+    if (callerUser) {
+      io.to(callerUser.id).emit('callAccepted', { signal });
+    }
+  });
+
+  socket.on('iceCandidate', ({ to, candidate }) => {
+    const targetUser = getAllUsers().find(u => u.name === to.trim().toLowerCase());
+    if (targetUser) {
+      io.to(targetUser.id).emit('iceCandidate', { candidate });
+    }
+  });
+
+  socket.on('declineCall', ({ to }) => {
+    const callerUser = getAllUsers().find(u => u.name === to.trim().toLowerCase());
+    if (callerUser) {
+      io.to(callerUser.id).emit('callDeclined');
+    }
+  });
+
+  socket.on('endCall', ({ to }) => {
+    const partnerUser = getAllUsers().find(u => u.name === to.trim().toLowerCase());
+    if (partnerUser) {
+      io.to(partnerUser.id).emit('endCall');
+    }
+  });
+
   socket.on('disconnect', () => {
     const user = removeUser(socket.id);
     const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
