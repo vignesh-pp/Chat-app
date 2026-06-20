@@ -285,3 +285,105 @@
   background: rgba(255, 255, 255, 0.3);
   transform: scale(1.05);
 }
+
+/* Message reactions styles */
+.reactionPickerWrapper {
+  position: relative;
+  display: inline-flex;
+}
+
+.emojiPickerTooltip {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%) translateY(8px);
+  background: var(--bg-sidebar);
+  border: 1px solid var(--border-color);
+  border-radius: 20px;
+  padding: 6px 10px;
+  display: flex;
+  gap: 8px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s cubic-bezier(0.16, 1, 0.3, 1), transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  z-index: 999;
+  backdrop-filter: blur(16px);
+}
+
+.reactionPickerWrapper:hover .emojiPickerTooltip {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateX(-50%) translateY(-6px);
+}
+
+.pickerEmojiBtn {
+  background: none;
+  border: none;
+  font-size: 1.25rem;
+  padding: 2px 4px;
+  cursor: pointer;
+  transition: transform 0.15s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.pickerEmojiBtn:hover {
+  transform: scale(1.35) translateY(-2px);
+}
+
+.reactionsListContainer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+  max-width: 100%;
+}
+
+.reactionsListContainer.alignEnd {
+  justify-content: flex-end;
+}
+
+.reactionsListContainer.alignStart {
+  justify-content: flex-start;
+}
+
+.reactionChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 12px;
+  font-size: 0.72rem;
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.2s ease;
+  background: var(--message-bg-received);
+  border: 1px solid var(--message-border-received);
+  color: var(--text-primary);
+}
+
+.reactionChip:hover {
+  transform: translateY(-1px);
+  background: var(--input-bg);
+  border-color: var(--border-color);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+.reactionChip.myReaction {
+  background: rgba(99, 102, 241, 0.15);
+  border-color: rgba(99, 102, 241, 0.35);
+  color: #6366f1;
+}
+
+.reactionChip.myReaction:hover {
+  background: rgba(99, 102, 241, 0.25);
+}
+
+.reactionEmoji {
+  font-size: 0.82rem;
+  line-height: 1;
+}
+
+.reactionCount {
+  font-weight: 600;
+}
+

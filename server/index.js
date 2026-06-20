@@ -72,7 +72,7 @@ io.on('connect', (socket) => {
     const targetRoom = (room || 'general').trim().toLowerCase();
     const { error, user } = addUser({ id: socket.id, name, room: targetRoom });
 
-    if(error) return callback(error);
+    if (error) return callback(error);
 
     const myNameLower = user.name.trim().toLowerCase();
 
@@ -110,11 +110,13 @@ io.on('connect', (socket) => {
     }
 
     const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    socket.emit('message', { user: 'admin', text: `${user.name}, welcome to room ${user.room}.`, room: user.room, time });
-    socket.broadcast.to(user.room).emit('message', { user: 'admin', text: `${user.name} has joined!`, room: user.room, time });
+    if (user.room && !user.room.startsWith('private_')) {
+      socket.emit('message', { user: 'admin', text: `${user.name}, welcome to room ${user.room}.`, room: user.room, time });
+      socket.broadcast.to(user.room).emit('message', { user: 'admin', text: `${user.name} has joined!`, room: user.room, time });
+    }
 
     io.to(user.room).emit('roomData', { room: user.room, users: getUsersInRoom(user.room) });
-    
+
     // Broadcast updated directories
     io.emit('allUsers', { users: getAllUsers() });
     socket.emit('allRooms', { rooms });
@@ -145,7 +147,8 @@ io.on('connect', (socket) => {
             room: msg.room,
             time: msg.time,
             isEdited: msg.isEdited,
-            isDeleted: msg.isDeleted
+            isDeleted: msg.isDeleted,
+            reactions: msg.reactions || []
           };
           if (!initMessages[msg.room]) {
             initMessages[msg.room] = [];
@@ -201,12 +204,16 @@ io.on('connect', (socket) => {
     const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
     // Notify old room
-    socket.broadcast.to(oldRoom).emit('message', { user: 'admin', text: `${user.name} has left.`, room: oldRoom, time });
+    if (oldRoom && !oldRoom.startsWith('private_')) {
+      socket.broadcast.to(oldRoom).emit('message', { user: 'admin', text: `${user.name} has left.`, room: oldRoom, time });
+    }
     io.to(oldRoom).emit('roomData', { room: oldRoom, users: getUsersInRoom(oldRoom) });
 
     // Notify new room
-    socket.emit('message', { user: 'admin', text: `Welcome to ${newRoom}, ${user.name}.`, room: newRoom, time });
-    socket.broadcast.to(newRoom).emit('message', { user: 'admin', text: `${user.name} has joined!`, room: newRoom, time });
+    if (newRoom && !newRoom.startsWith('private_')) {
+      socket.emit('message', { user: 'admin', text: `Welcome to ${newRoom}, ${user.name}.`, room: newRoom, time });
+      socket.broadcast.to(newRoom).emit('message', { user: 'admin', text: `${user.name} has joined!`, room: newRoom, time });
+    }
     io.to(newRoom).emit('roomData', { room: newRoom, users: getUsersInRoom(newRoom) });
 
     if (!config.isLocal) {
@@ -258,7 +265,8 @@ io.on('connect', (socket) => {
         fileName: messageData.fileName || null,
         fileType: messageData.fileType || null,
         room: roomKey,
-        time
+        time,
+        reactions: []
       };
 
       // Save to server history
@@ -323,7 +331,8 @@ io.on('connect', (socket) => {
         fileName: fileNameVal,
         fileType: fileTypeVal,
         room: user.room,
-        time
+        time,
+        reactions: []
       };
 
       // Save to server history
@@ -354,7 +363,7 @@ io.on('connect', (socket) => {
             .filter(username => username !== user.name.trim().toLowerCase() && !activeUsersInRoom.includes(username));
 
           if (targetUsers.length > 0) {
-            Promise.all(targetUsers.map(uName => 
+            Promise.all(targetUsers.map(uName =>
               Unread.findOneAndUpdate(
                 { username: uName, room: user.room },
                 { $inc: { count: 1 } },
@@ -457,6 +466,112 @@ io.on('connect', (socket) => {
     callback();
   });
 
+  socket.on('reactMessage', ({ messageId, emoji, recipient, type, room }, callback) => {
+    const user = getUser(socket.id);
+    if (!user) return callback ? callback({ error: 'User not found' }) : null;
+
+    const username = user.name;
+    let roomKey;
+
+    if (type === 'dm' && recipient) {
+      const recipientName = recipient.trim().toLowerCase();
+      roomKey = getPrivateRoomId(user.name, recipientName);
+    } else {
+      roomKey = room || user.room;
+    }
+
+    const toggleReactionArray = (reactionsArray) => {
+      const existingIdx = reactionsArray.findIndex(r => r.username.toLowerCase() === username.toLowerCase() && r.emoji === emoji);
+      if (existingIdx > -1) {
+        reactionsArray.splice(existingIdx, 1);
+      } else {
+        reactionsArray.push({ username, emoji });
+      }
+      return reactionsArray;
+    };
+
+    let updatedReactions = [];
+
+    if (roomKey && messagesByRoom[roomKey]) {
+      const msg = messagesByRoom[roomKey].find(m => m.id === messageId);
+      if (msg) {
+        if (!msg.reactions) {
+          msg.reactions = [];
+        }
+        updatedReactions = toggleReactionArray(msg.reactions);
+      }
+    }
+
+    if (!config.isLocal) {
+      Message.findOne({ id: messageId }).then(msg => {
+        if (msg) {
+          if (!msg.reactions) {
+            msg.reactions = [];
+          }
+          const dbReactions = toggleReactionArray(msg.reactions);
+          msg.reactions = dbReactions;
+          msg.save()
+            .then(savedMsg => {
+              broadcastReactions(savedMsg.reactions);
+            })
+            .catch(err => console.error('Error saving reaction in DB:', err));
+        }
+      }).catch(err => console.error('Error finding message for reaction in DB:', err));
+    } else {
+      broadcastReactions(updatedReactions);
+    }
+
+    function broadcastReactions(reactions) {
+      const payload = { messageId, reactions, room: roomKey };
+      if (type === 'dm' && recipient) {
+        const recipientName = recipient.trim().toLowerCase();
+        const recipientUser = getAllUsers().find(u => u.name === recipientName);
+        socket.emit('messageReacted', payload);
+        if (recipientUser) {
+          io.to(recipientUser.id).emit('messageReacted', payload);
+        }
+      } else {
+        io.to(roomKey).emit('messageReacted', payload);
+      }
+    }
+
+    if (callback) callback();
+  });
+
+  socket.on('deleteChat', async ({ id, type }, callback) => {
+    const user = getUser(socket.id);
+    if (!user) return callback({ error: 'User not found' });
+
+    let roomKey;
+    if (type === 'dm') {
+      roomKey = getPrivateRoomId(user.name, id);
+    } else {
+      roomKey = id.trim().toLowerCase();
+    }
+
+    // 1. Clear local memory cache if present
+    if (messagesByRoom[roomKey]) {
+      messagesByRoom[roomKey] = [];
+    }
+
+    // 2. Clear MongoDB if not local mode
+    if (!config.isLocal) {
+      try {
+        await Message.deleteMany({ room: roomKey });
+        // Reset unread count for this room/chat for all users in DB
+        await Unread.updateMany({ room: roomKey }, { count: 0 });
+      } catch (err) {
+        console.error('Error deleting chat from DB:', err);
+        return callback({ error: 'Failed to delete chat history from DB.' });
+      }
+    }
+
+    // 3. Broadcast chatDeleted event to everyone in that room
+    io.to(roomKey).emit('chatDeleted', { room: roomKey });
+
+    callback({ success: true });
+  });
+
   socket.on('typing', ({ recipient, type }) => {
     const user = getUser(socket.id);
     if (!user) return;
@@ -528,9 +643,11 @@ io.on('connect', (socket) => {
     const user = removeUser(socket.id);
     const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-    if(user) {
-      io.to(user.room).emit('message', { user: 'admin', text: `${user.name} has left.`, room: user.room, time });
-      io.to(user.room).emit('roomData', { room: user.room, users: getUsersInRoom(user.room)});
+    if (user) {
+      if (user.room && !user.room.startsWith('private_')) {
+        io.to(user.room).emit('message', { user: 'admin', text: `${user.name} has left.`, room: user.room, time });
+      }
+      io.to(user.room).emit('roomData', { room: user.room, users: getUsersInRoom(user.room) });
       io.emit('allUsers', { users: getAllUsers() });
     }
   })
@@ -541,7 +658,7 @@ let transporter;
 
 const getTransporter = async () => {
   if (transporter) return transporter;
-  
+
   try {
     const testAccount = await nodemailer.createTestAccount();
     transporter = nodemailer.createTransport({
@@ -573,7 +690,7 @@ app.post('/api/send-otp', async (req, res) => {
 
   const formattedEmail = email.trim().toLowerCase();
   const otp = Math.floor(100000 + Math.random() * 900000).toString();
-  
+
   otps[formattedEmail] = {
     otp,
     expires: Date.now() + 5 * 60 * 1000
@@ -597,7 +714,7 @@ app.post('/api/send-otp', async (req, res) => {
     });
 
     console.log(`[OTP SENT] Email: ${formattedEmail}, OTP: ${otp}`);
-    
+
     let previewUrl = '';
     if (typeof nodemailer.getTestMessageUrl === 'function') {
       previewUrl = nodemailer.getTestMessageUrl(info);
@@ -645,10 +762,13 @@ app.post('/api/check-username', async (req, res) => {
   const { username } = req.body;
   if (!username) return res.status(400).json({ error: 'Username is required.' });
   const formattedUsername = username.trim().toLowerCase();
-  
+
   if (config.isLocal) {
     return res.json({ success: true, available: true });
   } else {
+    if (mongoose.connection.readyState !== 1) {
+      return res.status(503).json({ error: 'Database is not connected. Please make sure MongoDB is running.' });
+    }
     try {
       const user = await User.findOne({ username: formattedUsername });
       if (user) {
@@ -674,6 +794,10 @@ app.post('/api/signup', async (req, res) => {
     return res.status(400).json({ error: 'DB operations are disabled in local mode.' });
   }
 
+  if (mongoose.connection.readyState !== 1) {
+    return res.status(503).json({ error: 'Database is not connected. Please make sure MongoDB is running.' });
+  }
+
   try {
     const existingUser = await User.findOne({ username: formattedUsername });
     if (existingUser) {
@@ -697,6 +821,10 @@ app.post('/api/login', async (req, res) => {
 
   if (config.isLocal) {
     return res.status(400).json({ error: 'DB operations are disabled in local mode.' });
+  }
+
+  if (mongoose.connection.readyState !== 1) {
+    return res.status(503).json({ error: 'Database is not connected. Please make sure MongoDB is running.' });
   }
 
   try {

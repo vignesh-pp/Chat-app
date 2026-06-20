@@ -34,7 +34,8 @@ const TextContainer = ({
   onCreateRoom, 
   theme, 
   toggleTheme,
-  unreadCounts
+  unreadCounts,
+  onDeleteChat
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [isCreatingRoom, setIsCreatingRoom] = useState(false);
@@ -53,14 +54,29 @@ const TextContainer = ({
     }
   };
 
+  const handleDeleteClick = (e, id, type) => {
+    e.stopPropagation();
+    const confirmMsg = type === 'dm'
+      ? `Are you sure you want to delete the entire chat history with ${id}?`
+      : `Are you sure you want to clear all messages in #${id}?`;
+    if (window.confirm(confirmMsg)) {
+      onDeleteChat({ id, type });
+    }
+  };
+
   // Filter lists based on search
   const filteredRooms = (rooms || []).filter(room => 
     room.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const filteredUsers = (dmContacts || []).filter(u => 
-    u.name.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredUsers = (dmContacts || []).filter(u => {
+    const isActive = activeChat.type === 'dm' && activeChat.id.toLowerCase() === u.name.toLowerCase();
+    if (searchTerm.trim() === '') {
+      return u.hasHistory || isActive;
+    } else {
+      return u.name.toLowerCase().includes(searchTerm.toLowerCase());
+    }
+  });
 
   return (
     <div className="textContainer">
@@ -142,6 +158,17 @@ const TextContainer = ({
                   <div className="roomHashBadge">#</div>
                   <span className="itemName">{roomName}</span>
                   {unreadCount > 0 && <span className="unreadBadge">{unreadCount}</span>}
+                  
+                  <button 
+                    onClick={(e) => handleDeleteClick(e, roomName, 'group')}
+                    className="deleteChatBtn"
+                    title="Clear group messages"
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="3 6 5 6 21 6"></polyline>
+                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                    </svg>
+                  </button>
                 </div>
               );
             })}
@@ -175,6 +202,17 @@ const TextContainer = ({
                     </div>
                     <span className="itemName">{user.name}</span>
                     {unreadCount > 0 && <span className="unreadBadge">{unreadCount}</span>}
+
+                    <button 
+                      onClick={(e) => handleDeleteClick(e, user.name, 'dm')}
+                      className="deleteChatBtn"
+                      title="Delete chat history"
+                    >
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="3 6 5 6 21 6"></polyline>
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                      </svg>
+                    </button>
                   </div>
                 );
               })

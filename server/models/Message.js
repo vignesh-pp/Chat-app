@@ -12,6 +12,10 @@ const MessageSchema = new mongoose.Schema({
   time: { type: String, required: true },
   isEdited: { type: Boolean, default: false },
   isDeleted: { type: Boolean, default: false },
+  reactions: [{
+    username: { type: String, required: true },
+    emoji: { type: String, required: true }
+  }],
   createdAt: { type: Date, default: Date.now }
 });
 

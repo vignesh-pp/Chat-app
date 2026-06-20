@@ -21,7 +21,7 @@ const getAvatarColor = (name) => {
   return colors[index];
 };
 
-const Message = ({ message: { id, text, user, isImage, isFile, fileName, fileType, time, isEdited, isDeleted }, name, onStartEdit, onDelete }) => {
+const Message = ({ message: { id, text, user, isImage, isFile, fileName, fileType, time, isEdited, isDeleted, reactions }, name, onStartEdit, onDelete, onReact }) => {
   let isSentByCurrentUser = false;
   const trimmedName = name.trim().toLowerCase();
   const messageUser = user ? user.trim().toLowerCase() : '';
@@ -107,6 +107,40 @@ const Message = ({ message: { id, text, user, isImage, isFile, fileName, fileTyp
     }
   };
 
+  const renderReactionsList = () => {
+    if (!reactions || reactions.length === 0) return null;
+
+    const grouped = {};
+    reactions.forEach(r => {
+      if (!grouped[r.emoji]) {
+        grouped[r.emoji] = [];
+      }
+      grouped[r.emoji].push(r.username);
+    });
+
+    return (
+      <div className={`reactionsListContainer ${isSentByCurrentUser ? 'alignEnd' : 'alignStart'}`}>
+        {Object.keys(grouped).map(emoji => {
+          const usersReacted = grouped[emoji];
+          const hasMyReaction = usersReacted.includes(trimmedName);
+          const tooltipText = usersReacted.join(', ');
+          
+          return (
+            <div 
+              key={emoji} 
+              className={`reactionChip ${hasMyReaction ? 'myReaction' : ''}`}
+              title={`Reacted by: ${tooltipText}`}
+              onClick={() => onReact(id, emoji)}
+            >
+              <span className="reactionEmoji">{emoji}</span>
+              <span className="reactionCount">{usersReacted.length}</span>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
   return (
     isSentByCurrentUser ? (
       <div className="messageContainer justifyEnd bubbleHoverContainer">
@@ -114,8 +148,29 @@ const Message = ({ message: { id, text, user, isImage, isFile, fileName, fileTyp
           <span className="messageSenderName">You</span>
           
           <div className="bubbleActionsWrapper">
-            {/* Edit / Delete menu option buttons */}
+            {/* Edit / Delete / React menu option buttons */}
             <div className="bubbleActionMenu">
+              <div className="reactionPickerWrapper">
+                <button className="messageActionBtn react" title="React to message">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <path d="M8 14s1.5 2 4 2 4-2 4-2"></path>
+                    <line x1="9" y1="9" x2="9.01" y2="9"></line>
+                    <line x1="15" y1="9" x2="15.01" y2="9"></line>
+                  </svg>
+                </button>
+                <div className="emojiPickerTooltip">
+                  {['👍', '❤️', '😂', '😮', '😢', '🙏'].map(emoji => (
+                    <button 
+                      key={emoji} 
+                      onClick={() => onReact(id, emoji)} 
+                      className="pickerEmojiBtn"
+                    >
+                      {emoji}
+                    </button>
+                  ))}
+                </div>
+              </div>
               {!isImage && !isFile && (
                 <button 
                   onClick={() => onStartEdit({ id, text })} 
@@ -138,6 +193,8 @@ const Message = ({ message: { id, text, user, isImage, isFile, fileName, fileTyp
               {renderMessageContent()}
             </div>
           </div>
+
+          {renderReactionsList()}
           
           <span className="messageTime">
             {time || 'Just now'} {isEdited && <span className="editedTag">• Edited</span>}
@@ -145,15 +202,45 @@ const Message = ({ message: { id, text, user, isImage, isFile, fileName, fileTyp
         </div>
       </div>
     ) : (
-      <div className="messageContainer justifyStart">
+      <div className="messageContainer justifyStart bubbleHoverContainer">
         <div className="avatarCircle messageAvatar" style={{ backgroundColor: avatarBg }}>
           {initials}
         </div>
         <div className="messageContentWrapper alignStart">
           <span className="messageSenderName">{user}</span>
-          <div className="messageBox backgroundLight">
-            {renderMessageContent()}
+          
+          <div className="bubbleActionsWrapper">
+            <div className="messageBox backgroundLight">
+              {renderMessageContent()}
+            </div>
+
+            <div className="bubbleActionMenu leftSide">
+              <div className="reactionPickerWrapper">
+                <button className="messageActionBtn react" title="React to message">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <path d="M8 14s1.5 2 4 2 4-2 4-2"></path>
+                    <line x1="9" y1="9" x2="9.01" y2="9"></line>
+                    <line x1="15" y1="9" x2="15.01" y2="9"></line>
+                  </svg>
+                </button>
+                <div className="emojiPickerTooltip">
+                  {['👍', '❤️', '😂', '😮', '😢', '🙏'].map(emoji => (
+                    <button 
+                      key={emoji} 
+                      onClick={() => onReact(id, emoji)} 
+                      className="pickerEmojiBtn"
+                    >
+                      {emoji}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
           </div>
+          
+          {renderReactionsList()}
+
           <span className="messageTime">
             {time || 'Just now'} {isEdited && <span className="editedTag">• Edited</span>}
           </span>

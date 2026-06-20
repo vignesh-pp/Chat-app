@@ -392,3 +392,59 @@
     height: 36px;
   }
 }
+
+/* Sidebar Chat Delete Button Styles */
+.sidebarItem {
+  position: relative; /* Anchor the delete button */
+}
+
+.unreadBadge {
+  transition: opacity 0.15s ease;
+}
+
+.sidebarItem:hover .unreadBadge {
+  opacity: 0;
+}
+
+.deleteChatBtn {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: var(--input-bg);
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  border-radius: 8px;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: all 0.2s ease;
+  z-index: 5;
+}
+
+.sidebarItem:hover .deleteChatBtn {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.deleteChatBtn:hover {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+  border-color: rgba(239, 68, 68, 0.3);
+  transform: translateY(-50%) scale(1.08);
+}
+
+.deleteChatBtn svg {
+  display: block;
+}
+
+@media (max-width: 768px) {
+  .deleteChatBtn {
+    display: none !important; /* Hide delete button in mobile compact view */
+  }
+}

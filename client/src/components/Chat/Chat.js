@@ -462,6 +462,13 @@ const Chat = ({ location, history }) => {
 
     socket.on("allRooms", ({ rooms }) => {
       setRooms(rooms);
+      // Switch back to general group chat if active room was deleted
+      const currentActive = activeChatRef.current;
+      if (currentActive && currentActive.type === 'group' && currentActive.id !== 'general' && !rooms.includes(currentActive.id)) {
+        if (handleSelectChatRef.current) {
+          handleSelectChatRef.current({ id: 'general', type: 'group' });
+        }
+      }
     });
 
     socket.on('typing', ({ user, room }) => {
@@ -552,6 +559,23 @@ const Chat = ({ location, history }) => {
       }
     });
 
+    socket.on('chatDeleted', ({ room }) => {
+      setMessagesByChat(prev => ({
+        ...prev,
+        [room]: []
+      }));
+    });
+
+    socket.on('messageReacted', ({ messageId, reactions, room }) => {
+      setMessagesByChat(prev => {
+        const chatMessages = prev[room] || [];
+        const updatedMessages = chatMessages.map(msg => 
+          msg.id === messageId ? { ...msg, reactions } : msg
+        );
+        return { ...prev, [room]: updatedMessages };
+      });
+    });
+
     return () => {
       socket.off('message');
       socket.off('editMessage');
@@ -566,6 +590,8 @@ const Chat = ({ location, history }) => {
       socket.off('callDeclined');
       socket.off('endCall');
       socket.off('iceCandidate');
+      socket.off('chatDeleted');
+      socket.off('messageReacted');
     };
   }, []);
 
@@ -614,6 +640,29 @@ const Chat = ({ location, history }) => {
       type: activeChat.type,
       room: activeChat.type === 'group' ? activeChat.id : null
     }, () => {});
+  };
+
+  const handleReactMessage = (messageId, emoji) => {
+    socket.emit('reactMessage', {
+      messageId,
+      emoji,
+      recipient: activeChat.type === 'dm' ? activeChat.id : null,
+      type: activeChat.type,
+      room: activeChat.type === 'group' ? activeChat.id : null
+    }, () => {});
+  };
+
+  const handleDeleteChat = ({ id, type }) => {
+    const roomKey = type === 'group' ? id : getPrivateRoomId(name, id);
+    setMessagesByChat(prev => ({
+      ...prev,
+      [roomKey]: []
+    }));
+    socket.emit('deleteChat', { id, type }, (res) => {
+      if (res && res.error) {
+        alert(res.error);
+      }
+    });
   };
 
   const handleStartEdit = (msg) => {
@@ -683,6 +732,9 @@ const Chat = ({ location, history }) => {
     });
   };
 
+  const handleSelectChatRef = useRef(handleSelectChat);
+  handleSelectChatRef.current = handleSelectChat;
+
   const handleCreateRoom = (roomName) => {
     socket.emit('createRoom', { roomName }, () => {
       handleSelectChat({ id: roomName, type: 'group' });
@@ -695,7 +747,7 @@ const Chat = ({ location, history }) => {
     localStorage.setItem('aether-theme', newTheme);
   };
 
-  const chattedUserNames = Object.keys(messagesByChat)
+  const interactedNames = Object.keys(messagesByChat)
     .filter(roomKey => roomKey.startsWith('private_'))
     .map(roomKey => {
       const parts = roomKey.replace('private_', '').split('_');
@@ -703,15 +755,38 @@ const Chat = ({ location, history }) => {
       return parts[0] === myNameLower ? parts[1] : parts[0];
     });
 
-  const onlineDMUsers = (users || [])
+  const onlineNames = (users || [])
     .filter(u => u.name.trim().toLowerCase() !== name.trim().toLowerCase())
-    .map(u => ({ name: u.name, isOnline: true }));
+    .map(u => u.name.trim().toLowerCase());
 
-  const chattedDMUsers = chattedUserNames
-    .filter(chattedName => !onlineDMUsers.some(onlineUser => onlineUser.name.toLowerCase() === chattedName.toLowerCase()))
-    .map(chattedName => ({ name: chattedName, isOnline: false }));
+  const allContactNames = Array.from(new Set([...interactedNames, ...onlineNames]));
 
-  const allDMContacts = [...onlineDMUsers, ...chattedDMUsers];
+  const allDMContacts = allContactNames.map(uName => {
+    const isOnline = onlineNames.includes(uName.toLowerCase());
+    const roomKey = getPrivateRoomId(name, uName);
+    
+    // Check if the chat has active (non-deleted) messages
+    const hasHistory = messagesByChat[roomKey] && messagesByChat[roomKey].some(m => !m.isDeleted);
+    
+    // Find the original casing from users list or messages
+    let originalName = uName;
+    const onlineUser = (users || []).find(u => u.name.toLowerCase() === uName.toLowerCase());
+    if (onlineUser) {
+      originalName = onlineUser.name;
+    } else {
+      const msgs = messagesByChat[roomKey] || [];
+      const matchingMsg = msgs.find(m => m.user.toLowerCase() !== name.toLowerCase());
+      if (matchingMsg) {
+        originalName = matchingMsg.user;
+      }
+    }
+
+    return {
+      name: originalName,
+      isOnline,
+      hasHistory: !!hasHistory
+    };
+  });
 
   const activeRoomId = activeChat.type === 'group' 
     ? activeChat.id 
@@ -731,6 +806,7 @@ const Chat = ({ location, history }) => {
           theme={theme}
           toggleTheme={toggleTheme}
           unreadCounts={unreadCounts}
+          onDeleteChat={handleDeleteChat}
         />
         <div className="container">
           <InfoBar 
@@ -744,6 +820,7 @@ const Chat = ({ location, history }) => {
             name={name} 
             onStartEdit={handleStartEdit}
             onDelete={handleDeleteMessage}
+            onReact={handleReactMessage}
           />
           
           {typingStatus && (
