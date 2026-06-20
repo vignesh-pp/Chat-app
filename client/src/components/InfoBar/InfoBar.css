@@ -2,27 +2,103 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: #2979FF;
-  border-radius: 4px 4px 0 0;
-  height: 60px;
+  background: var(--sidebar-header-bg);
+  border-bottom: 1px solid var(--border-color);
+  height: 70px;
   width: 100%;
+  padding: 0 24px;
+  border-radius: 20px 20px 0 0;
+  transition: background 0.3s ease, border-color 0.3s ease;
 }
 
 .leftInnerContainer {
-  flex: 0.5;
   display: flex;
   align-items: center;
-  margin-left: 5%;
-  color: white;
+  gap: 14px;
+}
+
+.roomBadge {
+  background: rgba(99, 102, 241, 0.15);
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  color: #6366f1;
+  padding: 8px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.roomInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.roomInfo h3 {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: -0.3px;
+  text-transform: capitalize;
+  transition: color 0.3s ease;
+}
+
+.onlineStatus {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.75rem;
+  color: #10b981;
+  font-weight: 500;
+}
+
+.onlineDot {
+  width: 6px;
+  height: 6px;
+  background-color: #10b981;
+  border-radius: 50%;
+  box-shadow: 0 0 8px #10b981;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0% {
+    transform: scale(0.9);
+    opacity: 0.6;
+  }
+  50% {
+    transform: scale(1.2);
+    opacity: 1;
+    box-shadow: 0 0 12px #10b981;
+  }
+  100% {
+    transform: scale(0.9);
+    opacity: 0.6;
+  }
 }
 
 .rightInnerContainer {
   display: flex;
-  flex: 0.5;
-  justify-content: flex-end;
-  margin-right: 5%;
+  align-items: center;
 }
 
-.onlineIcon {
-  margin-right: 5%;
+.closeButton {
+  color: var(--text-secondary);
+  padding: 8px;
+  border-radius: 10px;
+  background: var(--input-bg);
+  border: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  text-decoration: none;
+}
+
+.closeButton:hover {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: rgba(239, 68, 68, 0.3);
+  color: #ef4444;
+  transform: rotate(90deg);
 }

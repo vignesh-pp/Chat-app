@@ -6,9 +6,18 @@ import Message from './Message/Message';
 
 import './Messages.css';
 
-const Messages = ({ messages, name }) => (
+const Messages = ({ messages, name, onStartEdit, onDelete }) => (
   <ScrollToBottom className="messages">
-    {messages.map((message, i) => <div key={i}><Message message={message} name={name}/></div>)}
+    {messages.map((message, i) => (
+      <div key={message.id || i}>
+        <Message 
+          message={message} 
+          name={name} 
+          onStartEdit={onStartEdit} 
+          onDelete={onDelete} 
+        />
+      </div>
+    ))}
   </ScrollToBottom>
 );
 

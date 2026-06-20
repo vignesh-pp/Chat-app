@@ -1,27 +1,108 @@
+.inputContainer {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-sidebar);
+  border-top: 1px solid var(--border-color);
+  border-radius: 0 0 20px 20px;
+  transition: background 0.3s ease, border-color 0.3s ease;
+}
+
+.quickEmojisContainer {
+  display: flex;
+  gap: 12px;
+  padding: 8px 24px;
+  background: var(--quick-emoji-bg);
+  border-bottom: 1px solid var(--border-color);
+  transition: background 0.3s ease, border-color 0.3s ease;
+}
+
+.quickEmojiBtn {
+  background: none;
+  border: none;
+  font-size: 1.15rem;
+  cursor: pointer;
+  padding: 2px;
+  transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.quickEmojiBtn:hover {
+  transform: scale(1.3);
+}
+
 .form {
   display: flex;
-  border-top: 2px solid #D3D3D3;
+  align-items: center;
+  padding: 12px 20px;
+  gap: 12px;
 }
 
 .input {
-  border: none;
-  border-radius: 0;
-  padding: 5%;
-  width: 80%;
-  font-size: 1.2em;
+  flex: 1;
+  border: 1px solid var(--border-color);
+  background: var(--input-bg);
+  border-radius: 12px;
+  padding: 12px 16px;
+  font-size: 0.95rem;
+  color: var(--text-primary);
+  outline: none;
+  font-family: inherit;
+  transition: all 0.25s ease;
 }
 
-input:focus, textarea:focus, select:focus{
-  outline: none;
+.input::placeholder {
+  color: var(--text-secondary);
+  opacity: 0.6;
+}
+
+.input:focus {
+  border-color: #6366f1;
+  background: var(--input-bg);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+}
+
+.attachButton {
+  background: var(--input-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  width: 44px;
+  height: 44px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+
+.attachButton:hover {
+  color: #6366f1;
+  background: rgba(99, 102, 241, 0.1);
+  border-color: rgba(99, 102, 241, 0.3);
+  transform: translateY(-1px);
 }
 
 .sendButton {
-  color: #fff !important;
-  text-transform: uppercase;
-  text-decoration: none;
-  background: #2979FF;
-  padding: 20px;
-  display: inline-block;
+  background: linear-gradient(135deg, #6366f1 0%, #3b82f6 100%);
   border: none;
-  width: 20%;
+  border-radius: 12px;
+  width: 44px;
+  height: 44px;
+  color: #ffffff;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+
+.sendButton:hover {
+  transform: translateY(-1px) scale(1.02);
+  box-shadow: 0 6px 16px rgba(99, 102, 241, 0.4);
+  filter: brightness(1.1);
+}
+
+.sendButton:active {
+  transform: translateY(0px);
 }

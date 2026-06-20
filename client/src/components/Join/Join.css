@@ -1,12 +1,22 @@
-html,
-body {
-  font-family: 'Roboto', sans-serif;
-  padding: 0;
-  margin: 0;
+:root {
+  --bg-primary: #0a0d14;
+  --glass-bg: rgba(255, 255, 255, 0.03);
+  --glass-border: rgba(255, 255, 255, 0.08);
+  --text-primary: #ffffff;
+  --text-secondary: #94a3b8;
+  --accent-gradient: linear-gradient(135deg, #6366f1 0%, #3b82f6 100%);
+  --accent-shadow: rgba(99, 102, 241, 0.4);
+  --font-family: 'Poppins', sans-serif;
 }
 
-#root {
-  height: 100vh;
+html,
+body {
+  font-family: var(--font-family);
+  padding: 0;
+  margin: 0;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  overflow: hidden;
 }
 
 * {
@@ -14,66 +24,202 @@ body {
 }
 
 .joinOuterContainer {
+  position: relative;
   display: flex;
   justify-content: center;
-  text-align: center;
-  height: 100vh;
   align-items: center;
-  background-color: #1A1A1D;
+  height: 100vh;
+  width: 100vw;
+  background-color: var(--bg-primary);
+  overflow: hidden;
+}
+
+.joinBackgroundGlow {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 600px;
+  height: 600px;
+  background: radial-gradient(circle, rgba(99, 102, 241, 0.15) 0%, rgba(59, 130, 246, 0.05) 50%, rgba(0,0,0,0) 100%);
+  filter: blur(80px);
+  z-index: 1;
+  pointer-events: none;
 }
 
 .joinInnerContainer {
-  width: 20%;
+  position: relative;
+  width: 100%;
+  max-width: 420px;
+  padding: 40px;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-radius: 24px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.3);
+  z-index: 2;
+  text-align: center;
+  transition: all 0.3s ease;
+}
+
+.logoContainer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.logoEmoji {
+  font-size: 2.2rem;
+  filter: drop-shadow(0 0 10px rgba(99, 102, 241, 0.5));
+  animation: float 3s ease-in-out infinite;
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+
+.logoText {
+  font-size: 2.2rem;
+  font-weight: 700;
+  margin: 0;
+  letter-spacing: -0.5px;
+  background: linear-gradient(135deg, #ffffff 30%, #a5b4fc 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.subtitle {
+  color: var(--text-secondary);
+  font-size: 0.95rem;
+  margin-top: 0;
+  margin-bottom: 25px;
+  font-weight: 400;
+  line-height: 1.5;
+}
+
+/* Authentication Mode Tabs */
+.authTabs {
+  display: flex;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 12px;
+  padding: 4px;
+  margin-bottom: 24px;
+  gap: 4px;
+}
+
+.authTab {
+  flex: 1;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  padding: 10px 0;
+  font-family: var(--font-family);
+  font-size: 0.9rem;
+  font-weight: 600;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.authTab:hover {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.authTab.active {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+/* Alerts and Messages */
+.authError {
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  color: #f87171;
+  font-size: 0.85rem;
+  padding: 10px 14px;
+  border-radius: 10px;
+  margin-bottom: 20px;
+  text-align: left;
+  font-weight: 500;
+}
+
+.authSuccess {
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.2);
+  color: #34d399;
+  font-size: 0.85rem;
+  padding: 10px 14px;
+  border-radius: 10px;
+  margin-bottom: 20px;
+  text-align: left;
+  font-weight: 500;
+}
+
+.inputGroup {
+  margin-bottom: 16px;
+  text-align: left;
 }
 
 .joinInput {
-  border-radius: 5px;
-  padding: 10px 10px;
   width: 100%;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  padding: 14px 18px;
+  color: var(--text-primary);
+  font-family: var(--font-family);
+  font-size: 0.95rem;
   outline: none;
-  border: none;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.heading {
-  color: white;
-  font-size: 2em;
-  padding-bottom: 10px;
-  border-bottom: 2px solid white;
+.joinInput::placeholder {
+  color: rgba(255, 255, 255, 0.3);
+}
+
+.joinInput:focus {
+  border-color: #6366f1;
+  background: rgba(255, 255, 255, 0.07);
+  box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.15);
 }
 
 .button {
-  color: #fff !important;
-  text-transform: uppercase;
-  text-decoration: none;
-  background: #2979FF;
-  padding: 10px;
-  border-radius: 5px;
-  display: inline-block;
-  border: none;
   width: 100%;
-  cursor: pointer;
-}
-
-.mt-20 {
-  margin-top: 20px;
-}
-
-.mt-10 {
+  padding: 14px;
   margin-top: 10px;
+  border-radius: 12px;
+  border: none;
+  background: var(--accent-gradient);
+  color: #ffffff;
+  font-family: var(--font-family);
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 4px 20px var(--accent-shadow);
+  transition: all 0.25s ease;
 }
 
-@media (min-width: 320px) and (max-width: 480px) {
-  .joinOuterContainer {
-    height: 100%;
-  }
+.button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 25px var(--accent-shadow);
+  filter: brightness(1.1);
+}
 
+.button:active {
+  transform: translateY(1px);
+}
+
+@media (max-width: 480px) {
   .joinInnerContainer {
     width: 90%;
+    padding: 30px 20px;
   }
-
-
-}
-
-button:focus {
-  outline: 0;
 }
